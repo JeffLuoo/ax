@@ -176,6 +176,166 @@ func IsTunnelHealthy(port int) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// IsFinOpsTunnelHealthy reports whether a local port is serving the FinOps
+// HTTP API (/v1/costs).
+func IsFinOpsTunnelHealthy(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	client := http.Client{Timeout: 600 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/v1/costs", port))
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// EnsureFinOpsURL resolves the FinOps HTTP server URL.
+// Precedence:
+//  1. Explicit opts.ServerURL (--finops-server)
+//  2. $AX_FINOPS_SERVER or $FINOPS_SERVER environment variable
+//  3. Existing healthy tunnel saved for "<context>-finops"
+//  4. Existing local FinOps listener on port 18080 or 9090
+//  5. New background kubectl port-forward to svc/finops:9090 in opts.Namespace (default "ate-finops")
+func EnsureFinOpsURL(opts Options) (string, error) {
+	if opts.ServerURL != "" {
+		return opts.ServerURL, nil
+	}
+	if env := os.Getenv("AX_FINOPS_SERVER"); env != "" {
+		return env, nil
+	}
+	if env := os.Getenv("FINOPS_SERVER"); env != "" {
+		return env, nil
+	}
+
+	if opts.Namespace == "" {
+		if envNs := os.Getenv("AX_FINOPS_NAMESPACE"); envNs != "" {
+			opts.Namespace = envNs
+		} else {
+			opts.Namespace = "ate-finops"
+		}
+	}
+	if opts.Service == "" {
+		opts.Service = "finops"
+	}
+	if opts.Port == 0 {
+		opts.Port = 9090
+	}
+
+	ctxName, err := CurrentContext(opts.Context)
+	if err != nil || ctxName == "" {
+		for _, p := range []int{9090, 18080} {
+			if IsFinOpsTunnelHealthy(p) {
+				return fmt.Sprintf("http://127.0.0.1:%d", p), nil
+			}
+		}
+		return fmt.Sprintf("http://127.0.0.1:%d", opts.Port), nil
+	}
+
+	tunnelKey := ctxName + "-finops"
+	if existing, err := GetTunnel(tunnelKey); err == nil && existing != nil {
+		sameTarget := (existing.Namespace == "" || existing.Namespace == opts.Namespace) &&
+			(existing.Service == "" || existing.Service == opts.Service)
+		if sameTarget && IsFinOpsTunnelHealthy(existing.Port) {
+			return fmt.Sprintf("http://127.0.0.1:%d", existing.Port), nil
+		}
+		_ = StopTunnel(existing)
+	}
+
+	// Reuse an already-running local port-forward on 18080 or 9090 if healthy.
+	for _, p := range []int{18080, 9090} {
+		if IsFinOpsTunnelHealthy(p) {
+			return fmt.Sprintf("http://127.0.0.1:%d", p), nil
+		}
+	}
+
+	dir, err := TunnelDir()
+	if err != nil {
+		return "", fmt.Errorf("creating tunnel directory: %w", err)
+	}
+	logPath := filepath.Join(dir, SanitizeContext(tunnelKey)+".log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return "", fmt.Errorf("opening tunnel log: %w", err)
+	}
+	defer logFile.Close()
+
+	var kArgs []string
+	if ctxName != "" {
+		kArgs = append(kArgs, "--context", ctxName)
+	}
+	targetRes := fmt.Sprintf("svc/%s", opts.Service)
+	if opts.Target != "" {
+		targetRes = opts.Target
+	}
+	kArgs = append(kArgs, "port-forward", "-n", opts.Namespace, targetRes, fmt.Sprintf(":%d", opts.Port))
+
+	cmd := exec.Command("kubectl", kArgs...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("spawning kubectl port-forward to %s/%s for context %q: %w", opts.Namespace, targetRes, ctxName, err)
+	}
+
+	localPort := 0
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+
+		logData, err := os.ReadFile(logPath)
+		if err != nil {
+			continue
+		}
+		if match := portForwardRegex.FindStringSubmatch(string(logData)); len(match) > 1 {
+			p, err := strconv.Atoi(match[1])
+			if err == nil && p > 0 {
+				localPort = p
+				break
+			}
+		}
+
+		if err := syscall.Kill(cmd.Process.Pid, 0); err != nil {
+			return "", fmt.Errorf("kubectl port-forward to %s/%s exited for context %q: %s", opts.Namespace, targetRes, ctxName, strings.TrimSpace(string(logData)))
+		}
+	}
+
+	if localPort == 0 {
+		_ = cmd.Process.Kill()
+		logData, _ := os.ReadFile(logPath)
+		return "", fmt.Errorf("timeout waiting for kubectl port-forward to %s/%s on context %q: %s", opts.Namespace, targetRes, ctxName, strings.TrimSpace(string(logData)))
+	}
+
+	healthy := false
+	healthDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(healthDeadline) {
+		if IsFinOpsTunnelHealthy(localPort) {
+			healthy = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !healthy {
+		_ = cmd.Process.Kill()
+		return "", fmt.Errorf("FinOps tunnel started on port %d but /v1/costs check failed for context %q", localPort, ctxName)
+	}
+
+	info := &TunnelInfo{
+		Context:   tunnelKey,
+		Namespace: opts.Namespace,
+		Service:   opts.Service,
+		Port:      localPort,
+		PID:       cmd.Process.Pid,
+		CreatedAt: time.Now(),
+	}
+	_ = SaveTunnel(info)
+
+	return fmt.Sprintf("http://127.0.0.1:%d", localPort), nil
+}
+
 // EnsureServerURL resolves the AX server URL.
 // If ServerURL or AX_SERVER is explicitly set, it returns that.
 // Otherwise, it checks the active Kubernetes context (or opts.Context)

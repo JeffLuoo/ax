@@ -163,6 +163,14 @@ ax ctx                                # active kube context and how ax is reachi
 ax tunnel list                        # background tunnels (state lives in ~/.ax/tunnels)
 ax tunnel stop
 ax version
+
+# Agent FinOps cost attribution (requires FinOps deployed in ate-finops)
+ax cost -a my-atespace                # per-task / per-actor cost summary
+ax cost -A -o wide                    # all atespaces with UID, measured cost, and sub-agent tree cost
+ax cost task task123                  # 3-number hosting cost, LLM spend, sub-agents, and sessions
+ax cost curve                         # < $1.00 / agent-month hosting sensitivity curve
+ax cost focus                         # FOCUS 1.3 split cost allocation rows + _unused_capacity
+ax cost focus -o csv                  # export FOCUS 1.3 allocation rows as CSV
 ```
 
 ### Works with `kubectx`
@@ -188,6 +196,8 @@ ax --context=dev-cluster get tasks
 | `-n`, `--namespace` | Kubernetes namespace where AX is installed | `ax-system` |
 | `--context` | Kubernetes context to target | active `kubectx` / `current-context` |
 | `--server` | Control plane address, bypassing auto-detection | derived from kube context, or `$AX_SERVER` |
+| `--finops-server` | FinOps HTTP API address, bypassing auto-detection | derived from kube context (`svc/finops:9090`), or `$AX_FINOPS_SERVER` |
+| `--finops-namespace` | Kubernetes namespace where FinOps is installed | `ate-finops` |
 
 ## License
 

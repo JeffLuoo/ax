@@ -48,12 +48,14 @@ func main() {
 
 	opts := parseGlobalArgs(os.Args[1:])
 	var (
-		cmd            = opts.cmd
-		cleanArgs      = opts.args
-		atespace       = opts.atespace
-		explicitServer = opts.server
-		kubeContext    = opts.kubeContext
-		axNamespace    = opts.namespace
+		cmd             = opts.cmd
+		cleanArgs       = opts.args
+		atespace        = opts.atespace
+		explicitServer  = opts.server
+		kubeContext     = opts.kubeContext
+		axNamespace     = opts.namespace
+		finopsServer    = opts.finopsServer
+		finopsNamespace = opts.finopsNamespace
 	)
 
 	if cmd == "" {
@@ -77,6 +79,31 @@ func main() {
 		return
 	case "tunnel":
 		if err := runTunnel(cleanArgs); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	case "cost", "costs":
+		parsedCost, err := parseCostArgs(cleanArgs)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if parsedCost.help {
+			fmt.Println(costUsage)
+			return
+		}
+		finopsURL, err := tunnel.EnsureFinOpsURL(tunnel.Options{
+			ServerURL: finopsServer,
+			Context:   kubeContext,
+			Namespace: finopsNamespace,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		axURL := resolveOptionalAXServerURL(explicitServer, kubeContext)
+		if err := runCost(finopsURL, axURL, atespace, atespace != "default", cleanArgs); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -137,12 +164,14 @@ func main() {
 // globalArgs holds the command name, the flags shared by every command, and the
 // remaining arguments for the command itself.
 type globalArgs struct {
-	cmd         string
-	args        []string
-	atespace    string
-	server      string
-	kubeContext string
-	namespace   string
+	cmd             string
+	args            []string
+	atespace        string
+	server          string
+	kubeContext     string
+	namespace       string
+	finopsServer    string
+	finopsNamespace string
 }
 
 // parseGlobalArgs extracts the command name and the global flags from args. It
@@ -169,6 +198,20 @@ func parseGlobalArgs(args []string) globalArgs {
 			}
 		} else if strings.HasPrefix(arg, "--server=") {
 			g.server = strings.TrimPrefix(arg, "--server=")
+		} else if arg == "--finops-server" {
+			if i+1 < len(args) {
+				g.finopsServer = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--finops-server=") {
+			g.finopsServer = strings.TrimPrefix(arg, "--finops-server=")
+		} else if arg == "--finops-namespace" {
+			if i+1 < len(args) {
+				g.finopsNamespace = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--finops-namespace=") {
+			g.finopsNamespace = strings.TrimPrefix(arg, "--finops-namespace=")
 		} else if arg == "--context" {
 			if i+1 < len(args) {
 				g.kubeContext = args[i+1]
@@ -206,9 +249,13 @@ Available Commands:
   get workspace <name>    Get a specific workspace
   get models              List models
   get model <name>        Get a specific model
-  describe task <name>    Show detailed information about a task
+  describe task <name>    Show detailed information about a task (including FinOps cost when available)
   describe workspace <name> Show detailed information about a workspace
   describe model <name>   Show detailed information about a model
+  cost [tasks|actors]     Show Agent FinOps cost summary across tasks and actors
+  cost task <name>        Show 3-number hosting cost, LLM spend, sub-agent tree, and session breakdown
+  cost curve              Show < $1.00 / agent-month hosting cost sensitivity curve (On-Demand, CUD, Spot)
+  cost focus              Show FOCUS 1.3 split cost allocation rows and reconciliation check
   watch task <name>       Stream live status and condition updates for a task
   ssh <task-name> [-- cmd] Run a command or shell inside the running task container
                           (Ctrl-C is forwarded; press it twice quickly, or Ctrl-\, to exit locally)
@@ -222,10 +269,12 @@ Available Commands:
   version                 Print AX version
 
 Flags:
-  -a, --atespace string       Task atespace scope (default: "default")
-  -n, --namespace string      Kubernetes namespace where AX is installed (default: "ax-system")
-  --context string            Kubernetes context (defaults to active kubectx / current-context)
-  --server string             AX API server address (default: auto-detected from kube context or $AX_SERVER)`)
+  -a, --atespace string         Task atespace scope (default: "default")
+  -n, --namespace string        Kubernetes namespace where AX is installed (default: "ax-system")
+  --context string              Kubernetes context (defaults to active kubectx / current-context)
+  --server string               AX API server address (default: auto-detected from kube context or $AX_SERVER)
+  --finops-server string        FinOps HTTP server address (default: auto-detected from kube context or $AX_FINOPS_SERVER)
+  --finops-namespace string     Kubernetes namespace where FinOps is installed (default: "ate-finops")`)
 }
 
 func getAXClient(serverURL string) (v1alpha1.AXClient, *grpc.ClientConn, error) {
@@ -434,7 +483,6 @@ func runGet(serverURL, atespace string, args []string) error {
 		return yaml.NewEncoder(os.Stdout).Encode(task)
 	}
 
-
 	if (resource == "workspaces" || resource == "workspace") && len(args) == 1 {
 		resp, err := client.ListWorkspaces(ctx, &v1alpha1.ListWorkspacesRequest{Atespace: atespace})
 		if err != nil {
@@ -641,7 +689,6 @@ func runDescribe(serverURL, atespace string, args []string) error {
 		return nil
 	}
 
-
 	task, err := client.GetTask(ctx, &v1alpha1.GetTaskRequest{Atespace: atespace, Name: name})
 	if err != nil {
 		return fmt.Errorf("getting task %q: %w", name, err)
@@ -698,6 +745,8 @@ func runDescribe(serverURL, atespace string, args []string) error {
 		}
 		_ = w.Flush()
 	}
+
+	tryPrintTaskDescribeCost(os.Stdout, resolveOptionalFinOpsURL("", ""), taskAtespace, taskName, actor)
 
 	return nil
 }
@@ -947,6 +996,16 @@ func runContext(kubeContext string) error {
 	} else {
 		fmt.Println("AX Tunnel:                 No background tunnel running (will auto-connect on next command)")
 	}
+	if ft, err := tunnel.GetTunnel(ctxName + "-finops"); err == nil && ft != nil {
+		status := "Healthy"
+		if !tunnel.IsFinOpsTunnelHealthy(ft.Port) {
+			status = "Stale / Not responding"
+		}
+		fmt.Printf("FinOps Tunnel:             http://127.0.0.1:%d -> %s/svc/%s:9090 (PID: %d, %s)\n",
+			ft.Port, ft.Namespace, ft.Service, ft.PID, status)
+	} else if u := resolveOptionalFinOpsURL("", ctxName); u != "" {
+		fmt.Printf("FinOps Endpoint:           %s (healthy)\n", u)
+	}
 	return nil
 }
 
@@ -969,7 +1028,13 @@ func runTunnel(args []string) error {
 		fmt.Fprintln(w, "CONTEXT\tLOCAL PORT\tREMOTE SERVICE\tPID\tSTATUS\tCREATED")
 		for _, t := range tunnels {
 			status := "Active"
-			if !tunnel.IsTunnelHealthy(t.Port) {
+			healthy := false
+			if t.Service == "finops" || strings.HasSuffix(t.Context, "-finops") {
+				healthy = tunnel.IsFinOpsTunnelHealthy(t.Port)
+			} else {
+				healthy = tunnel.IsTunnelHealthy(t.Port)
+			}
+			if !healthy {
 				status = "Stale"
 			}
 			fmt.Fprintf(w, "%s\t%d\t%s/%s\t%d\t%s\t%s\n",
