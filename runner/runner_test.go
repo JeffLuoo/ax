@@ -164,10 +164,6 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	dir := t.TempDir()
 
-	origAXDir := workspace.AXDir
-	workspace.AXDir = filepath.Join(dir, "ax")
-	t.Cleanup(func() { workspace.AXDir = origAXDir })
-
 	h := &harness{
 		wsPath:   filepath.Join(dir, "workspace"),
 		finished: make(chan struct{}),
@@ -268,12 +264,13 @@ func TestRun_SetsUpEveryWorkspace(t *testing.T) {
 		t.Fatalf("unexpected exit: %+v", exit)
 	}
 
-	// Both workspace directories exist and each has its own maiden-run marker.
+	// Both workspace directories exist and each has its own maiden-run marker
+	// in the runner's state directory on the durable volume.
 	for _, p := range []string{codePath, toolsPath} {
 		if st, err := os.Stat(p); err != nil || !st.IsDir() {
 			t.Errorf("workspace dir %s missing: %v", p, err)
 		}
-		marker := filepath.Join(workspace.AXDir, workspace.MarkerName(p))
+		marker := filepath.Join(h.cfg.StateDir, workspace.MarkerName(p))
 		if _, err := os.Stat(marker); err != nil {
 			t.Errorf("marker %s missing: %v", marker, err)
 		}

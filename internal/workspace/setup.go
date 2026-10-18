@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,8 +30,11 @@ import (
 )
 
 const (
-	// DefaultAXDir is the default directory inside the container used for AX system state and logs.
-	DefaultAXDir = "/ax"
+	// DefaultAXDir is the default directory for AX system state and logs. It
+	// is on the durable /workspace volume: Agent Substrate restores only that
+	// volume on a resume, so a marker anywhere else is lost and the next boot
+	// would set the workspace up again over the restored files.
+	DefaultAXDir = defaultWorkspacePath + "/.ax"
 	// InitializedMarkerFilename is the base name of the marker file written after a successful maiden run.
 	InitializedMarkerFilename = "initialized"
 
@@ -59,8 +63,8 @@ const (
 	filePerm = 0o644
 )
 
-// AXDir is the directory inside the container used for AX system state and logs.
-// Tests override it to keep state out of the workspace.
+// AXDir is the state directory that SetupWorkspace uses. SetupIn takes the
+// directory as an argument instead.
 var AXDir = DefaultAXDir
 
 // SetupResult contains details about the workspace maiden initialization.
@@ -81,6 +85,16 @@ type SetupResult struct {
 // Git failures are logged and recorded under AXDir but do not abort setup. The marker
 // is withheld in that case so the next start retries the clone.
 func SetupWorkspace(ctx context.Context, ws *v1alpha1.Workspace, targetPath string, goal string) (*SetupResult, error) {
+	return SetupIn(ctx, ws, targetPath, goal, AXDir)
+}
+
+// SetupIn is SetupWorkspace with the state directory, which holds the marker,
+// the setup logs, and the bootstrap agent's data, given by the caller. Use a
+// directory on the durable volume, so that the marker survives a resume.
+func SetupIn(ctx context.Context, ws *v1alpha1.Workspace, targetPath, goal, stateDir string) (*SetupResult, error) {
+	if stateDir == "" {
+		stateDir = DefaultAXDir
+	}
 	if targetPath == "" {
 		targetPath = defaultWorkspacePath
 	}
@@ -94,11 +108,11 @@ func SetupWorkspace(ctx context.Context, ws *v1alpha1.Workspace, targetPath stri
 	if err := os.MkdirAll(targetPath, dirPerm); err != nil {
 		return nil, fmt.Errorf("creating workspace directory %s: %w", targetPath, err)
 	}
-	if err := os.MkdirAll(AXDir, dirPerm); err != nil {
-		slog.Warn("creating ax state directory", "dir", AXDir, "error", err)
+	if err := os.MkdirAll(stateDir, dirPerm); err != nil {
+		slog.Warn("creating ax state directory", "dir", stateDir, "error", err)
 	}
 
-	markerPath := filepath.Join(AXDir, MarkerName(targetPath))
+	markerPath := filepath.Join(stateDir, MarkerName(targetPath))
 	if _, err := os.Stat(markerPath); err == nil {
 		slog.Info("workspace already initialized; skipping maiden run setup", "path", targetPath)
 		return res, nil
@@ -110,12 +124,12 @@ func SetupWorkspace(ctx context.Context, ws *v1alpha1.Workspace, targetPath stri
 	gitOK := true
 	if ws != nil && ws.Spec != nil {
 		writeFiles(ws.Spec.Files, targetPath)
-		res.ClonedRepos, gitOK = cloneRepos(ctx, ws.Spec.Git, targetPath)
+		res.ClonedRepos, gitOK = cloneRepos(ctx, ws.Spec.Git, targetPath, stateDir)
 		res.SkillsMounted = setupSkills(ws.Spec.Skills)
 	}
 
 	if goal != "" {
-		res.BootstrapRan = runBootstrap(ctx, goal, targetPath)
+		res.BootstrapRan = runBootstrap(ctx, goal, targetPath, stateDir)
 	}
 
 	if !gitOK {
@@ -130,7 +144,7 @@ func SetupWorkspace(ctx context.Context, ws *v1alpha1.Workspace, targetPath stri
 
 // cloneRepos fetches each declared repository into the workspace. It returns the
 // repositories that succeeded and whether every clone succeeded.
-func cloneRepos(ctx context.Context, repos []*v1alpha1.GitRepo, targetPath string) ([]string, bool) {
+func cloneRepos(ctx context.Context, repos []*v1alpha1.GitRepo, targetPath, stateDir string) ([]string, bool) {
 	var cloned []string
 	ok := true
 	for _, repo := range repos {
@@ -155,12 +169,13 @@ func cloneRepos(ctx context.Context, repos []*v1alpha1.GitRepo, targetPath strin
 		if err != nil {
 			ok = false
 			slog.Warn("git fetch error (continuing setup)", "repo", repo.Repo, "error", err, "output", string(out))
-			writeStateFile(gitErrorLog, fmt.Appendf(nil, "error: %v\noutput: %s\n", err, out))
+			writeStateFile(stateDir, gitErrorLog, fmt.Appendf(nil, "error: %v\noutput: %s\n", err, out))
 			continue
 		}
 
 		cloned = append(cloned, repo.Repo)
-		writeStateFile(gitSuccessLog, out)
+		writeStateFile(stateDir, gitSuccessLog, out)
+		excludeStateDir(dest, stateDir)
 	}
 	return cloned, ok
 }
@@ -275,7 +290,7 @@ func setupSkills(skills *v1alpha1.SkillsConfig) string {
 // installed and an API key in the environment; when either is missing the step is
 // skipped with a log line. Failures are logged and otherwise ignored so the task's own
 // command still starts.
-func runBootstrap(ctx context.Context, goal, targetPath string) bool {
+func runBootstrap(ctx context.Context, goal, targetPath, stateDir string) bool {
 	if _, err := os.Stat(bootstrapScriptPath); err != nil {
 		slog.Info("Antigravity bootstrap script not installed; skipping", "script", bootstrapScriptPath)
 		return false
@@ -290,7 +305,7 @@ func runBootstrap(ctx context.Context, goal, targetPath string) bool {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	dataDir := filepath.Join(AXDir, bootstrapDataDir)
+	dataDir := filepath.Join(stateDir, bootstrapDataDir)
 	if err := os.MkdirAll(dataDir, dirPerm); err != nil {
 		slog.Warn("creating Antigravity data dir", "dir", dataDir, "error", err)
 	}
@@ -356,9 +371,38 @@ func writeMarker(path string, ws *v1alpha1.Workspace) {
 	}
 }
 
-// writeStateFile writes a diagnostic file under AXDir, logging rather than failing on error.
-func writeStateFile(name string, data []byte) {
-	path := filepath.Join(AXDir, name)
+// excludeStateDir adds stateDir to the local exclude file of the repository
+// cloned at dest when stateDir is inside dest's working tree, for example a
+// repository cloned into the workspace root (dir "."). Then the agent cannot
+// commit the runner's markers, logs, or the bootstrap agent's data by mistake.
+func excludeStateDir(dest, stateDir string) {
+	rel, err := filepath.Rel(dest, stateDir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return
+	}
+	pattern := "/" + filepath.ToSlash(rel) + "/"
+	path := filepath.Join(dest, ".git", "info", "exclude")
+	if b, err := os.ReadFile(path); err == nil && slices.Contains(strings.Split(string(b), "\n"), pattern) {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
+		slog.Warn("creating the git exclude directory", "path", path, "error", err)
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
+	if err != nil {
+		slog.Warn("opening the git exclude file", "path", path, "error", err)
+		return
+	}
+	defer f.Close()
+	if _, err := fmt.Fprintf(f, "\n# AX runner state (markers, logs, bootstrap data)\n%s\n", pattern); err != nil {
+		slog.Warn("writing the git exclude file", "path", path, "error", err)
+	}
+}
+
+// writeStateFile writes a diagnostic file under stateDir, logging rather than failing on error.
+func writeStateFile(stateDir, name string, data []byte) {
+	path := filepath.Join(stateDir, name)
 	if err := os.WriteFile(path, data, filePerm); err != nil {
 		slog.Warn("failed to write state file", "path", path, "error", err)
 	}

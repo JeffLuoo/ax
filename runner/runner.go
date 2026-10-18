@@ -255,7 +255,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	ready := true
 	for _, m := range mounts {
-		if _, err := workspace.SetupWorkspace(ctx, m.ws, m.path, m.ref.GetGoal()); err != nil {
+		if _, err := workspace.SetupIn(ctx, m.ws, m.path, m.ref.GetGoal(), stateDir); err != nil {
 			slog.Error("workspace maiden run setup failed", "workspace", m.ref.GetName(), "path", m.path, "error", err)
 			ready = false
 		}

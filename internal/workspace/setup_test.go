@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -329,5 +330,102 @@ func TestSetupWorkspace_InlinedFiles(t *testing.T) {
 	}
 	if string(notesData) != "Hello AX" {
 		t.Errorf("unexpected content in notes.txt: %s", string(notesData))
+	}
+}
+
+// initSourceRepo makes a local git repository with one commit on main.
+func initSourceRepo(t *testing.T) string {
+	t.Helper()
+	srcDir := t.TempDir()
+	initCmd := exec.Command("sh", "-c", "git init && git symbolic-ref HEAD refs/heads/main && git config user.email 'test@ax.io' && git config user.name 'AX' && echo 'hello' > README.md && git add . && git commit -m 'initial'")
+	initCmd.Dir = srcDir
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to init test git repo: %v (%s)", err, string(out))
+	}
+	return srcDir
+}
+
+// A resume restores only the durable volume. The marker is in the state
+// directory on that volume, so the second boot finds it and does not set the
+// workspace up again over the restored files.
+func TestSetupIn_MarkerOnTheDurableVolumeSurvivesAResume(t *testing.T) {
+	volume := t.TempDir()
+	stateDir := filepath.Join(volume, ".ax")
+	ws := &v1alpha1.Workspace{
+		Metadata: &v1alpha1.ObjectMeta{Name: "durable"},
+		Spec:     &v1alpha1.WorkspaceSpec{Git: []*v1alpha1.GitRepo{{Name: "code", Repo: initSourceRepo(t)}}},
+	}
+	first, err := workspace.SetupIn(context.Background(), ws, volume, "", stateDir)
+	if err != nil || !first.IsMaidenRun {
+		t.Fatalf("first boot: %+v, %v", first, err)
+	}
+	// The agent changes the clone; a second setup would throw this away.
+	edited := filepath.Join(volume, "code", "README.md")
+	if err := os.WriteFile(edited, []byte("agent work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspace.SetupIn(context.Background(), ws, volume, "", stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.IsMaidenRun {
+		t.Error("second boot set the workspace up again")
+	}
+	if b, _ := os.ReadFile(edited); string(b) != "agent work\n" {
+		t.Errorf("the agent's change is lost: %q", b)
+	}
+}
+
+// A repository cloned into the workspace root holds the state directory in its
+// working tree, so the clone's local exclude file lists it once.
+func TestSetupIn_ExcludesTheStateDirFromARepoAtTheRoot(t *testing.T) {
+	volume := t.TempDir()
+	stateDir := filepath.Join(volume, ".ax")
+	ws := &v1alpha1.Workspace{
+		Metadata: &v1alpha1.ObjectMeta{Name: "root-repo"},
+		Spec:     &v1alpha1.WorkspaceSpec{Git: []*v1alpha1.GitRepo{{Repo: initSourceRepo(t), Dir: "."}}},
+	}
+	if _, err := workspace.SetupIn(context.Background(), ws, volume, "", stateDir); err != nil {
+		t.Fatal(err)
+	}
+	status := exec.Command("git", "status", "--porcelain")
+	status.Dir = volume
+	out, err := status.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v (%s)", err, out)
+	}
+	if strings.Contains(string(out), ".ax") {
+		t.Errorf("git status shows the state directory:\n%s", out)
+	}
+	// A retry of the clone must not add the entry twice.
+	if err := os.Remove(filepath.Join(stateDir, workspace.MarkerName(volume))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspace.SetupIn(context.Background(), ws, volume, "", stateDir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(volume, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(b), "\n/.ax/\n"); n != 1 {
+		t.Errorf("exclude lists /.ax/ %d times:\n%s", n, b)
+	}
+}
+
+// A repository in a subdirectory does not contain the state directory, so its
+// exclude file stays as git made it.
+func TestSetupIn_LeavesOtherReposExcludeAlone(t *testing.T) {
+	volume := t.TempDir()
+	ws := &v1alpha1.Workspace{
+		Metadata: &v1alpha1.ObjectMeta{Name: "sub-repo"},
+		Spec:     &v1alpha1.WorkspaceSpec{Git: []*v1alpha1.GitRepo{{Name: "code", Repo: initSourceRepo(t)}}},
+	}
+	if _, err := workspace.SetupIn(context.Background(), ws, volume, "", filepath.Join(volume, ".ax")); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(volume, "code", ".git", "info", "exclude"))
+	if strings.Contains(string(b), ".ax") {
+		t.Errorf("a repository outside the state directory's path got an exclude entry:\n%s", b)
 	}
 }
