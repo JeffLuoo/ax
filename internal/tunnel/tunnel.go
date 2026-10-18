@@ -176,14 +176,15 @@ func IsTunnelHealthy(port int) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// IsFinOpsTunnelHealthy reports whether a local port is serving the FinOps
-// HTTP API (/v1/costs).
+// IsFinOpsTunnelHealthy reports whether a local port answers the FinOps
+// service's health check (/healthz). It does not ask for /v1/costs, which
+// builds a full report.
 func IsFinOpsTunnelHealthy(port int) bool {
 	if port <= 0 {
 		return false
 	}
 	client := http.Client{Timeout: 600 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/v1/costs", port))
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
 	if err != nil {
 		return false
 	}
@@ -191,21 +192,25 @@ func IsFinOpsTunnelHealthy(port int) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// FinOpsTunnelKey is the name under which the FinOps tunnel for a kube
+// context is saved.
+func FinOpsTunnelKey(ctxName string) string { return ctxName + "-finops" }
+
 // EnsureFinOpsURL resolves the FinOps HTTP server URL.
 // Precedence:
 //  1. Explicit opts.ServerURL (--finops-server)
-//  2. $AX_FINOPS_SERVER or $FINOPS_SERVER environment variable
-//  3. Existing healthy tunnel saved for "<context>-finops"
-//  4. Existing local FinOps listener on port 18080 or 9090
-//  5. New background kubectl port-forward to svc/finops:9090 in opts.Namespace (default "ate-finops")
+//  2. $AX_FINOPS_SERVER
+//  3. The healthy tunnel saved for "<context>-finops"
+//  4. A new background kubectl port-forward to svc/finops:9090 in
+//     opts.Namespace (default "ate-finops") for the context
+//
+// It never uses a local port that no saved tunnel names for the context,
+// because such a port can forward to another cluster.
 func EnsureFinOpsURL(opts Options) (string, error) {
 	if opts.ServerURL != "" {
 		return opts.ServerURL, nil
 	}
 	if env := os.Getenv("AX_FINOPS_SERVER"); env != "" {
-		return env, nil
-	}
-	if env := os.Getenv("FINOPS_SERVER"); env != "" {
 		return env, nil
 	}
 
@@ -225,15 +230,10 @@ func EnsureFinOpsURL(opts Options) (string, error) {
 
 	ctxName, err := CurrentContext(opts.Context)
 	if err != nil || ctxName == "" {
-		for _, p := range []int{9090, 18080} {
-			if IsFinOpsTunnelHealthy(p) {
-				return fmt.Sprintf("http://127.0.0.1:%d", p), nil
-			}
-		}
-		return fmt.Sprintf("http://127.0.0.1:%d", opts.Port), nil
+		return "", fmt.Errorf("no Kubernetes context to reach FinOps through; pass --finops-server or set $AX_FINOPS_SERVER")
 	}
 
-	tunnelKey := ctxName + "-finops"
+	tunnelKey := FinOpsTunnelKey(ctxName)
 	if existing, err := GetTunnel(tunnelKey); err == nil && existing != nil {
 		sameTarget := (existing.Namespace == "" || existing.Namespace == opts.Namespace) &&
 			(existing.Service == "" || existing.Service == opts.Service)
@@ -241,13 +241,6 @@ func EnsureFinOpsURL(opts Options) (string, error) {
 			return fmt.Sprintf("http://127.0.0.1:%d", existing.Port), nil
 		}
 		_ = StopTunnel(existing)
-	}
-
-	// Reuse an already-running local port-forward on 18080 or 9090 if healthy.
-	for _, p := range []int{18080, 9090} {
-		if IsFinOpsTunnelHealthy(p) {
-			return fmt.Sprintf("http://127.0.0.1:%d", p), nil
-		}
 	}
 
 	dir, err := TunnelDir()
@@ -320,7 +313,7 @@ func EnsureFinOpsURL(opts Options) (string, error) {
 
 	if !healthy {
 		_ = cmd.Process.Kill()
-		return "", fmt.Errorf("FinOps tunnel started on port %d but /v1/costs check failed for context %q", localPort, ctxName)
+		return "", fmt.Errorf("FinOps tunnel started on port %d but its /healthz check failed for context %q", localPort, ctxName)
 	}
 
 	info := &TunnelInfo{

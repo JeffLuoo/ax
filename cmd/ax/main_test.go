@@ -289,7 +289,12 @@ func TestParseGlobalArgs(t *testing.T) {
 		{
 			name: "flags before and after the command",
 			args: []string{"-a", "team", "get", "tasks", "--namespace=ax"},
-			want: globalArgs{cmd: "get", args: []string{"tasks"}, atespace: "team", namespace: "ax"},
+			want: globalArgs{cmd: "get", args: []string{"tasks"}, atespace: "team", atespaceSet: true, namespace: "ax"},
+		},
+		{
+			name: "an explicit -a default counts as explicit",
+			args: []string{"--atespace=default", "cost"},
+			want: globalArgs{cmd: "cost", atespace: "default", atespaceSet: true, namespace: "ax-system"},
 		},
 		{
 			name: "flags after -- belong to the remote command",
@@ -305,10 +310,11 @@ func TestParseGlobalArgs(t *testing.T) {
 			name: "global flags before -- still apply",
 			args: []string{"ssh", "-a", "team", "task123", "--", "ls", "--context=x"},
 			want: globalArgs{
-				cmd:       "ssh",
-				args:      []string{"task123", "--", "ls", "--context=x"},
-				atespace:  "team",
-				namespace: "ax-system",
+				cmd:         "ssh",
+				args:        []string{"task123", "--", "ls", "--context=x"},
+				atespace:    "team",
+				atespaceSet: true,
+				namespace:   "ax-system",
 			},
 		},
 	}

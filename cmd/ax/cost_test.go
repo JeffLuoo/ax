@@ -103,7 +103,7 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/costs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(finops.CostReport{
+		writeCostReport(w, r, finops.CostReport{
 			Since:           "2026-10-17T00:00:00Z",
 			GeneratedAt:     "2026-10-17T01:00:00Z",
 			Totals:          finops.Totals{Calls: 2, InputTokens: 2800, OutputTokens: 600, Cost: finops.MoneyMap{"USD": 0.015525}},
@@ -269,6 +269,27 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// writeCostReport serves report the way finops does: filtered to the
+// ?atespace= in the request, with fields that the CLI's structs do not have.
+func writeCostReport(w http.ResponseWriter, r *http.Request, report finops.CostReport) {
+	if scope := r.URL.Query().Get("atespace"); scope != "" {
+		report.Atespace = scope
+		var rows []finops.ActorCost
+		for _, a := range report.Actors {
+			if a.Atespace == scope {
+				rows = append(rows, a)
+			}
+		}
+		report.Actors = rows
+	}
+	data, _ := json.Marshal(report)
+	var doc map[string]any
+	_ = json.Unmarshal(data, &doc)
+	doc["futureField"] = map[string]any{"kept": true}
+	doc["costBasis"] = "estimated"
+	_ = json.NewEncoder(w).Encode(doc)
+}
+
 func captureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	output, err := os.CreateTemp(t.TempDir(), "stdout")
@@ -315,7 +336,7 @@ func TestRunCostCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runCost list failed: %v", err)
 		}
-		for _, want := range []string{"NAME", "PHASE", "coding-parent-1", "Running", "$0.159432", "$0.308161", "Summary (atespace otel-bench, 2 actors)"} {
+		for _, want := range []string{"NAME", "PHASE", "coding-parent-1", "Running", "$0.159432", "$0.308161", "Summary (atespace otel-bench, 2 rows)", "fully_loaded=$0.308161", "Cost basis: ESTIMATE — NOT RECONCILED"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("expected output to contain %q, got:\n%s", want, out)
 			}

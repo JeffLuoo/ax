@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package finops provides an HTTP client for querying the Agent FinOps cost
-// and allocation APIs (/v1/costs, /v1/costs/curve, /v1/costs/focus, /v1/leases).
+// and allocation APIs (/v1/costs, /v1/costs/curve, /v1/costs/focus).
 package finops
 
 import (
@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -56,30 +57,38 @@ func (m MoneyMap) USD() float64 {
 
 // Totals summarizes token and LLM call spend.
 type Totals struct {
-	Calls                 int64            `json:"calls" yaml:"calls"`
-	InputTokens           int64            `json:"inputTokens" yaml:"inputTokens"`
-	OutputTokens          int64            `json:"outputTokens" yaml:"outputTokens"`
-	CacheReadInputTokens  int64            `json:"cacheReadInputTokens,omitempty" yaml:"cacheReadInputTokens,omitempty"`
-	CacheWriteInputTokens int64            `json:"cacheWriteInputTokens,omitempty" yaml:"cacheWriteInputTokens,omitempty"`
-	ReasoningOutputTokens int64            `json:"reasoningOutputTokens,omitempty" yaml:"reasoningOutputTokens,omitempty"`
-	Cost                  MoneyMap         `json:"cost" yaml:"cost"`
-	UnpricedCalls         int64            `json:"unpricedCalls,omitempty" yaml:"unpricedCalls,omitempty"`
-	UsageStatus           map[string]int64 `json:"usageStatus,omitempty" yaml:"usageStatus,omitempty"`
-	LastCall              string           `json:"lastCall,omitempty" yaml:"lastCall,omitempty"`
+	Calls                 int64    `json:"calls" yaml:"calls"`
+	InputTokens           int64    `json:"inputTokens" yaml:"inputTokens"`
+	OutputTokens          int64    `json:"outputTokens" yaml:"outputTokens"`
+	CacheReadInputTokens  int64    `json:"cacheReadInputTokens,omitempty" yaml:"cacheReadInputTokens,omitempty"`
+	CacheWriteInputTokens int64    `json:"cacheWriteInputTokens,omitempty" yaml:"cacheWriteInputTokens,omitempty"`
+	ReasoningOutputTokens int64    `json:"reasoningOutputTokens,omitempty" yaml:"reasoningOutputTokens,omitempty"`
+	WebSearchRequests     int64    `json:"webSearchRequests,omitempty" yaml:"webSearchRequests,omitempty"`
+	Cost                  MoneyMap `json:"cost" yaml:"cost"`
+	UnpricedCalls         int64    `json:"unpricedCalls,omitempty" yaml:"unpricedCalls,omitempty"`
+	// UnknownCostCalls counts calls whose cost is unknown: no usage report
+	// arrived (for example a stream without usage, or one cut short), so
+	// they are neither priced nor counted in UnpricedCalls.
+	UnknownCostCalls int64            `json:"unknownCostCalls,omitempty" yaml:"unknownCostCalls,omitempty"`
+	UsageStatus      map[string]int64 `json:"usageStatus,omitempty" yaml:"usageStatus,omitempty"`
+	LastCall         string           `json:"lastCall,omitempty" yaml:"lastCall,omitempty"`
 }
 
 // ComputeSummary summarizes booked and measured compute leases.
 type ComputeSummary struct {
-	Leases             int64    `json:"leases" yaml:"leases"`
-	OpenLeases         int64    `json:"openLeases,omitempty" yaml:"openLeases,omitempty"`
-	LeaseSeconds       float64  `json:"leaseSeconds" yaml:"leaseSeconds"`
-	VCPUSeconds        float64  `json:"vcpuSeconds" yaml:"vcpuSeconds"`
-	GiBSeconds         float64  `json:"gibSeconds" yaml:"gibSeconds"`
-	Cost               MoneyMap `json:"cost" yaml:"cost"`
-	MeasuredCost       MoneyMap `json:"measuredCost,omitempty" yaml:"measuredCost,omitempty"`
-	UnpricedLeases     int64    `json:"unpricedLeases,omitempty" yaml:"unpricedLeases,omitempty"`
-	MeasuredCPUSeconds float64  `json:"measuredCpuSeconds,omitempty" yaml:"measuredCpuSeconds,omitempty"`
-	LastLease          string   `json:"lastLease,omitempty" yaml:"lastLease,omitempty"`
+	Leases       int64    `json:"leases" yaml:"leases"`
+	OpenLeases   int64    `json:"openLeases,omitempty" yaml:"openLeases,omitempty"`
+	LeaseSeconds float64  `json:"leaseSeconds" yaml:"leaseSeconds"`
+	VCPUSeconds  float64  `json:"vcpuSeconds" yaml:"vcpuSeconds"`
+	GiBSeconds   float64  `json:"gibSeconds" yaml:"gibSeconds"`
+	Cost         MoneyMap `json:"cost" yaml:"cost"`
+	MeasuredCost MoneyMap `json:"measuredCost,omitempty" yaml:"measuredCost,omitempty"`
+	// MeasuredFallbackLeases had no usage sample, so their measured cost is
+	// the booked cost.
+	MeasuredFallbackLeases int64   `json:"measuredFallbackLeases,omitempty" yaml:"measuredFallbackLeases,omitempty"`
+	UnpricedLeases         int64   `json:"unpricedLeases,omitempty" yaml:"unpricedLeases,omitempty"`
+	MeasuredCPUSeconds     float64 `json:"measuredCpuSeconds,omitempty" yaml:"measuredCpuSeconds,omitempty"`
+	LastLease              string  `json:"lastLease,omitempty" yaml:"lastLease,omitempty"`
 }
 
 // ModelCost holds per-(provider, model) token usage and spend for an actor.
@@ -101,15 +110,18 @@ type ModelCost struct {
 // ActorCost holds full cost attribution (LLM, compute, storage, idle/platform
 // overhead, and sub-agent tree rollup) for one actor or Kubernetes pod.
 type ActorCost struct {
-	Atespace                string           `json:"atespace" yaml:"atespace"`
-	Name                    string           `json:"name" yaml:"name"`
-	UID                     string           `json:"uid,omitempty" yaml:"uid,omitempty"`
-	Tenant                  string           `json:"tenant,omitempty" yaml:"tenant,omitempty"`
-	ParentAgentID           string           `json:"parentAgentId,omitempty" yaml:"parentAgentId,omitempty"`
-	SubAgents               int              `json:"subAgents,omitempty" yaml:"subAgents,omitempty"`
-	Template                string           `json:"template,omitempty" yaml:"template,omitempty"`
-	Class                   string           `json:"class,omitempty" yaml:"class,omitempty"`
-	IsAgent                 bool             `json:"isAgent" yaml:"isAgent"`
+	Atespace      string `json:"atespace" yaml:"atespace"`
+	Name          string `json:"name" yaml:"name"`
+	UID           string `json:"uid,omitempty" yaml:"uid,omitempty"`
+	Tenant        string `json:"tenant,omitempty" yaml:"tenant,omitempty"`
+	ParentAgentID string `json:"parentAgentId,omitempty" yaml:"parentAgentId,omitempty"`
+	SubAgents     int    `json:"subAgents,omitempty" yaml:"subAgents,omitempty"`
+	Template      string `json:"template,omitempty" yaml:"template,omitempty"`
+	Class         string `json:"class,omitempty" yaml:"class,omitempty"`
+	IsAgent       bool   `json:"isAgent" yaml:"isAgent"`
+	// Note is set on a row that is not one actor: spend whose actor finops
+	// could not identify, or actors beyond its limit. Such a row has no name.
+	Note                    string           `json:"note,omitempty" yaml:"note,omitempty"`
 	Calls                   int64            `json:"calls" yaml:"calls"`
 	InputTokens             int64            `json:"inputTokens" yaml:"inputTokens"`
 	OutputTokens            int64            `json:"outputTokens" yaml:"outputTokens"`
@@ -118,6 +130,7 @@ type ActorCost struct {
 	ReasoningOutputTokens   int64            `json:"reasoningOutputTokens,omitempty" yaml:"reasoningOutputTokens,omitempty"`
 	Cost                    MoneyMap         `json:"cost" yaml:"cost"`
 	UnpricedCalls           int64            `json:"unpricedCalls,omitempty" yaml:"unpricedCalls,omitempty"`
+	UnknownCostCalls        int64            `json:"unknownCostCalls,omitempty" yaml:"unknownCostCalls,omitempty"`
 	UsageStatus             map[string]int64 `json:"usageStatus,omitempty" yaml:"usageStatus,omitempty"`
 	LastCall                string           `json:"lastCall,omitempty" yaml:"lastCall,omitempty"`
 	Compute                 ComputeSummary   `json:"compute" yaml:"compute"`
@@ -135,7 +148,39 @@ type ActorCost struct {
 	TreeComputeCost         MoneyMap         `json:"treeComputeCost,omitempty" yaml:"treeComputeCost,omitempty"`
 	TreeTotalCost           MoneyMap         `json:"treeTotalCost,omitempty" yaml:"treeTotalCost,omitempty"`
 	TreeFullyLoadedCost     MoneyMap         `json:"treeFullyLoadedCost,omitempty" yaml:"treeFullyLoadedCost,omitempty"`
-	Models                  []ModelCost      `json:"models,omitempty" yaml:"models,omitempty"`
+	// Task is the Ax task that the actor runs, when finops knows it.
+	Task   *TaskCost   `json:"task,omitempty" yaml:"task,omitempty"`
+	Models []ModelCost `json:"models,omitempty" yaml:"models,omitempty"`
+}
+
+// TaskCost is the Ax task that an actor runs, with the actor's spend against
+// the task's budget, as finops reports it. Spend is LLM plus compute, in USD.
+type TaskCost struct {
+	Name           string  `json:"name" yaml:"name"`
+	Parent         string  `json:"parent,omitempty" yaml:"parent,omitempty"`
+	BudgetUSD      float64 `json:"budgetUsd,omitempty" yaml:"budgetUsd,omitempty"`
+	SpendUSD       float64 `json:"spendUsd" yaml:"spendUsd"`
+	TreeSpendUSD   float64 `json:"treeSpendUsd" yaml:"treeSpendUsd"`
+	OverBudget     bool    `json:"overBudget" yaml:"overBudget"`
+	TreeOverBudget bool    `json:"treeOverBudget" yaml:"treeOverBudget"`
+	Outcome        string  `json:"outcome,omitempty" yaml:"outcome,omitempty"`
+	ExitCode       *int32  `json:"exitCode,omitempty" yaml:"exitCode,omitempty"`
+}
+
+// OutcomeTotals is the cost of the actors whose tasks had one outcome.
+type OutcomeTotals struct {
+	Tasks           int      `json:"tasks" yaml:"tasks"`
+	Actors          int      `json:"actors" yaml:"actors"`
+	TotalCost       MoneyMap `json:"totalCost" yaml:"totalCost"`
+	FullyLoadedCost MoneyMap `json:"fullyLoadedCost" yaml:"fullyLoadedCost"`
+}
+
+// OutcomeCosts splits the actors' own cost by their task's outcome.
+type OutcomeCosts struct {
+	Completed  OutcomeTotals `json:"completed" yaml:"completed"`
+	Failed     OutcomeTotals `json:"failed" yaml:"failed"`
+	Unfinished OutcomeTotals `json:"unfinished" yaml:"unfinished"`
+	NoTask     OutcomeTotals `json:"noTask" yaml:"noTask"`
 }
 
 // VariableHostingUSD returns the variable hosting cost (booked compute + storage + egress).
@@ -230,6 +275,15 @@ type FocusElement struct {
 	UsageUnit                string  `json:"UsageUnit,omitempty" yaml:"UsageUnit,omitempty"`
 	PricePerUnit             float64 `json:"x_PricePerUnit,omitempty" yaml:"x_PricePerUnit,omitempty"`
 	UnusedCapacityResourceID string  `json:"x_UnusedCapacityResourceId,omitempty" yaml:"x_UnusedCapacityResourceId,omitempty"`
+	// Method is the method that produced the row's numbers, which can
+	// differ from AllocatedMethodId when usage samples are missing.
+	Method               string   `json:"x_Method,omitempty" yaml:"x_Method,omitempty"`
+	MeasuredLeases       int64    `json:"x_MeasuredLeases,omitempty" yaml:"x_MeasuredLeases,omitempty"`
+	BookedFallbackLeases int64    `json:"x_BookedFallbackLeases,omitempty" yaml:"x_BookedFallbackLeases,omitempty"`
+	IdleVCPUHours        *float64 `json:"x_IdleVCPUHours,omitempty" yaml:"x_IdleVCPUHours,omitempty"`
+	IdleGiBHours         *float64 `json:"x_IdleGiBHours,omitempty" yaml:"x_IdleGiBHours,omitempty"`
+	ExpectedIdleCost     *float64 `json:"x_ExpectedIdleCost,omitempty" yaml:"x_ExpectedIdleCost,omitempty"`
+	PriceGap             *float64 `json:"x_PriceGap,omitempty" yaml:"x_PriceGap,omitempty"`
 }
 
 // FocusMethodDetails holds FOCUS 1.3 AllocatedMethodDetails.
@@ -237,10 +291,18 @@ type FocusMethodDetails struct {
 	Elements []FocusElement `json:"Elements,omitempty" yaml:"Elements,omitempty"`
 }
 
+// EstimatedTag is the FOCUS tag that finops sets to "true" on a charge that
+// comes from rate card prices rather than from the bill.
+const EstimatedTag = "finops.agent-substrate.dev/estimated"
+
 // FocusCharge represents one FOCUS 1.3 split cost allocation row.
 type FocusCharge struct {
 	OriginChargeID         string             `json:"OriginChargeId" yaml:"OriginChargeId"`
+	BillingAccountID       string             `json:"BillingAccountId,omitempty" yaml:"BillingAccountId,omitempty"`
 	BillingCurrency        string             `json:"BillingCurrency" yaml:"BillingCurrency"`
+	ChargeClass            string             `json:"ChargeClass,omitempty" yaml:"ChargeClass,omitempty"`
+	RegionID               string             `json:"RegionId,omitempty" yaml:"RegionId,omitempty"`
+	Tags                   map[string]string  `json:"Tags,omitempty" yaml:"Tags,omitempty"`
 	BillingPeriodStart     string             `json:"BillingPeriodStart,omitempty" yaml:"BillingPeriodStart,omitempty"`
 	BillingPeriodEnd       string             `json:"BillingPeriodEnd,omitempty" yaml:"BillingPeriodEnd,omitempty"`
 	ChargePeriodStart      string             `json:"ChargePeriodStart,omitempty" yaml:"ChargePeriodStart,omitempty"`
@@ -270,32 +332,82 @@ type FocusCharge struct {
 	AllocatedTags          map[string]string  `json:"AllocatedTags,omitempty" yaml:"AllocatedTags,omitempty"`
 }
 
+// Estimated reports whether the charge is an estimate from rate card prices.
+func (c FocusCharge) Estimated() bool {
+	return c.Tags[EstimatedTag] == "true" || c.AllocatedTags[EstimatedTag] == "true"
+}
+
 // FocusReconciliation summarizes bottom-up vs. origin charge reconciliation.
 type FocusReconciliation struct {
-	ResourceID    string   `json:"resourceId" yaml:"resourceId"`
-	Pool          string   `json:"pool" yaml:"pool"`
-	PeriodStart   string   `json:"periodStart" yaml:"periodStart"`
-	PeriodEnd     string   `json:"periodEnd" yaml:"periodEnd"`
-	Estimated     bool     `json:"estimated" yaml:"estimated"`
-	OriginCost    float64  `json:"originCost" yaml:"originCost"`
-	Allocated     float64  `json:"allocated" yaml:"allocated"`
-	Unallocated   float64  `json:"unallocated" yaml:"unallocated"`
-	Agents        int      `json:"agents" yaml:"agents"`
-	UnsizedLeases int      `json:"unsizedLeases" yaml:"unsizedLeases"`
-	Problems      []string `json:"problems,omitempty" yaml:"problems,omitempty"`
+	ResourceID    string  `json:"resourceId" yaml:"resourceId"`
+	Pool          string  `json:"pool" yaml:"pool"`
+	PeriodStart   string  `json:"periodStart" yaml:"periodStart"`
+	PeriodEnd     string  `json:"periodEnd" yaml:"periodEnd"`
+	Estimated     bool    `json:"estimated" yaml:"estimated"`
+	OriginCost    float64 `json:"originCost" yaml:"originCost"`
+	Allocated     float64 `json:"allocated" yaml:"allocated"`
+	Unallocated   float64 `json:"unallocated" yaml:"unallocated"`
+	Agents        int     `json:"agents" yaml:"agents"`
+	UnsizedLeases int     `json:"unsizedLeases" yaml:"unsizedLeases"`
+	// EstimatedLeases had a start or end that no lifecycle record showed.
+	EstimatedLeases int      `json:"estimatedLeases,omitempty" yaml:"estimatedLeases,omitempty"`
+	Problems        []string `json:"problems,omitempty" yaml:"problems,omitempty"`
+	// ExpectedIdle is the idle capacity at rate card prices, when the pool's
+	// capacity is known.
+	ExpectedIdle *float64 `json:"expectedIdle,omitempty" yaml:"expectedIdle,omitempty"`
+	// PriceGap compares the bill with capacity at rate card prices; it does
+	// not depend on the leases. Older servers send it as Gap.
+	PriceGap *float64 `json:"priceGap,omitempty" yaml:"priceGap,omitempty"`
+	Gap      *float64 `json:"gap,omitempty" yaml:"gap,omitempty"`
+	// The coverage check compares the leases' hours with the activation
+	// hours in the runtime's usage records, which come from another source.
+	CoverageLeaseHours      *float64 `json:"coverageLeaseHours,omitempty" yaml:"coverageLeaseHours,omitempty"`
+	CoverageActivationHours *float64 `json:"coverageActivationHours,omitempty" yaml:"coverageActivationHours,omitempty"`
+	CoverageCoveredHours    *float64 `json:"coverageCoveredHours,omitempty" yaml:"coverageCoveredHours,omitempty"`
+	CoverageExcessHours     *float64 `json:"coverageExcessHours,omitempty" yaml:"coverageExcessHours,omitempty"`
+	CoverageRatio           *float64 `json:"coverageRatio,omitempty" yaml:"coverageRatio,omitempty"`
+}
+
+// PriceGapValue returns PriceGap, or Gap from an older server, or nil.
+func (r FocusReconciliation) PriceGapValue() *float64 {
+	if r.PriceGap != nil {
+		return r.PriceGap
+	}
+	return r.Gap
 }
 
 // FocusReport is the response from GET /v1/costs/focus.
 type FocusReport struct {
-	OriginCharge   FocusCharge          `json:"originCharge" yaml:"originCharge"`
-	Charges        []FocusCharge        `json:"charges" yaml:"charges"`
-	Reconciliation *FocusReconciliation `json:"reconciliation,omitempty" yaml:"reconciliation,omitempty"`
+	// OriginCharge is the first of OriginCharges, one per pool, and
+	// Reconciliation totals Reconciliations.
+	OriginCharge     FocusCharge           `json:"originCharge" yaml:"originCharge"`
+	OriginCharges    []FocusCharge         `json:"originCharges,omitempty" yaml:"originCharges,omitempty"`
+	Charges          []FocusCharge         `json:"charges" yaml:"charges"`
+	AuxiliaryCharges []FocusCharge         `json:"auxiliaryCharges,omitempty" yaml:"auxiliaryCharges,omitempty"`
+	Reconciliation   *FocusReconciliation  `json:"reconciliation,omitempty" yaml:"reconciliation,omitempty"`
+	Reconciliations  []FocusReconciliation `json:"reconciliations,omitempty" yaml:"reconciliations,omitempty"`
 }
 
-// CostReport is the response from GET /v1/costs.
+// Estimated reports whether the report's origin is an estimate from rate
+// card prices rather than a bill.
+func (f FocusReport) Estimated() bool {
+	return (f.Reconciliation != nil && f.Reconciliation.Estimated) || f.OriginCharge.Estimated()
+}
+
+// CostBasisEstimated is the CostReport.CostBasis of numbers that come from
+// rate card prices and have not been reconciled with a bill.
+const CostBasisEstimated = "estimated"
+
+// CostReport is the response from GET /v1/costs. The CLI reads it to render
+// tables; -o json and -o yaml print the server's body as it came.
 type CostReport struct {
-	Since               string               `json:"since" yaml:"since"`
-	GeneratedAt         string               `json:"generatedAt" yaml:"generatedAt"`
+	Since       string `json:"since" yaml:"since"`
+	GeneratedAt string `json:"generatedAt" yaml:"generatedAt"`
+	// Atespace is set when the server filtered the report to one atespace;
+	// its totals then cover only that atespace.
+	Atespace string `json:"atespace,omitempty" yaml:"atespace,omitempty"`
+	// CostBasis says how far the numbers can be trusted, e.g. "estimated".
+	CostBasis           string               `json:"costBasis,omitempty" yaml:"costBasis,omitempty"`
 	Totals              Totals               `json:"totals" yaml:"totals"`
 	Compute             ComputeSummary       `json:"compute" yaml:"compute"`
 	TotalCost           MoneyMap             `json:"totalCost" yaml:"totalCost"`
@@ -303,9 +415,18 @@ type CostReport struct {
 	Actors              []ActorCost          `json:"actors" yaml:"actors"`
 	Templates           []TemplateCost       `json:"templates,omitempty" yaml:"templates,omitempty"`
 	Sessions            []SessionCost        `json:"sessions,omitempty" yaml:"sessions,omitempty"`
-	HostingCurve        *CurveReport         `json:"hostingCurve,omitempty" yaml:"hostingCurve,omitempty"`
-	FocusCharges        []FocusCharge        `json:"focusCharges,omitempty" yaml:"focusCharges,omitempty"`
+	Curve               []TierCurve          `json:"curve,omitempty" yaml:"curve,omitempty"`
+	Focus               []FocusCharge        `json:"focus,omitempty" yaml:"focus,omitempty"`
 	FocusReconciliation *FocusReconciliation `json:"focusReconciliation,omitempty" yaml:"focusReconciliation,omitempty"`
+	OutcomeCosts        *OutcomeCosts        `json:"outcomeCosts,omitempty" yaml:"outcomeCosts,omitempty"`
+}
+
+// Estimated reports whether the report's numbers are estimates: the server
+// says so, or it says nothing (finops prices from a rate card unless a bill
+// is reconciled).
+func (r CostReport) Estimated() bool {
+	return r.CostBasis == "" || r.CostBasis == CostBasisEstimated ||
+		(r.FocusReconciliation != nil && r.FocusReconciliation.Estimated)
 }
 
 // Client queries the FinOps HTTP server.
@@ -338,136 +459,222 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
-// GetCosts fetches the full cost summary from GET /v1/costs.
-func (c *Client) GetCosts(ctx context.Context) (*CostReport, error) {
+// GetCosts fetches GET /v1/costs. A non-empty atespace asks the server for
+// that atespace only, so the totals cover only its actors. It returns the
+// decoded report and the body as the server sent it.
+func (c *Client) GetCosts(ctx context.Context, atespace string) (*CostReport, []byte, error) {
 	var report CostReport
-	if err := c.getJSON(ctx, "/v1/costs", &report); err != nil {
-		return nil, err
-	}
-	return &report, nil
-}
-
-// GetActorCost looks up a single actor/task by (atespace, name), "<atespace>/<name>",
-// or Actor UID (`gen_ai.agent.id`), and returns the matching ActorCost, its
-// sessions, its direct child sub-agents, and the full CostReport.
-func (c *Client) GetActorCost(ctx context.Context, atespace, nameOrUID string) (*ActorCost, []SessionCost, []ActorCost, *CostReport, error) {
-	report, err := c.GetCosts(ctx)
+	raw, err := c.getJSON(ctx, "/v1/costs", atespaceQuery(atespace), &report)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
-
-	targetAtespace := atespace
-	targetName := strings.TrimSpace(nameOrUID)
-	if parts := strings.SplitN(targetName, "/", 2); len(parts) == 2 {
-		targetAtespace = parts[0]
-		targetName = parts[1]
-	}
-
-	var matched *ActorCost
-	for i := range report.Actors {
-		a := &report.Actors[i]
-		if a.Name == targetName && (targetAtespace == "" || a.Atespace == targetAtespace) {
-			matched = a
-			break
-		}
-	}
-	if matched == nil {
-		// Fall back to UID prefix or exact name match across atespaces.
-		for i := range report.Actors {
-			a := &report.Actors[i]
-			if (a.UID != "" && (a.UID == targetName || strings.HasPrefix(a.UID, targetName))) || a.Name == targetName {
-				matched = a
-				break
-			}
-		}
-	}
-	if matched == nil {
-		scope := targetName
-		if targetAtespace != "" {
-			scope = targetAtespace + "/" + targetName
-		}
-		return nil, nil, nil, report, fmt.Errorf("no FinOps cost record found for %q", scope)
-	}
-
-	fullActorKey := matched.Atespace + "/" + matched.Name
-	var sessions []SessionCost
-	for _, s := range report.Sessions {
-		if s.Actor == fullActorKey || s.Actor == matched.Name || (matched.UID != "" && s.ActorUID == matched.UID) {
-			sessions = append(sessions, s)
-		}
-	}
-
-	var children []ActorCost
-	if matched.UID != "" {
-		for _, a := range report.Actors {
-			if a.ParentAgentID == matched.UID {
-				children = append(children, a)
-			}
-		}
-	}
-
-	return matched, sessions, children, report, nil
+	return &report, raw, nil
 }
 
-// GetCurve fetches the < $1/agent-month hosting cost sensitivity curve from GET /v1/costs/curve.
-func (c *Client) GetCurve(ctx context.Context) (*CurveReport, error) {
+// ActorMatch is one actor's cost record with the rows that belong to it.
+type ActorMatch struct {
+	Actor *ActorCost
+	// Raw is the actor's row as the server sent it.
+	Raw       json.RawMessage
+	Sessions  []json.RawMessage
+	SubAgents []json.RawMessage
+	// SessionCosts and Children are the decoded Sessions and SubAgents.
+	SessionCosts []SessionCost
+	Children     []ActorCost
+	Report       *CostReport
+}
+
+// AmbiguousError is returned when a name or UID prefix matches more than one
+// actor record.
+type AmbiguousError struct {
+	Target     string
+	Candidates []string
+}
+
+func (e *AmbiguousError) Error() string {
+	return fmt.Sprintf("%q matches %d FinOps cost records (%s); name one by its full actor UID", e.Target, len(e.Candidates), strings.Join(e.Candidates, ", "))
+}
+
+// MinUIDPrefix is the shortest UID prefix that GetActorCost accepts.
+const MinUIDPrefix = 8
+
+// GetActorCost finds one actor's cost record. target is a name, an
+// "<atespace>/<name>", an actor UID (gen_ai.agent.id), or a unique UID
+// prefix of at least MinUIDPrefix characters.
+//
+// A name matches only exactly. When atespaceExplicit is true, or target names
+// its atespace, only that atespace is searched. Otherwise the atespace is
+// searched first and then all atespaces. More than one match, for example an
+// actor that was made again under the same name with a new UID, is an
+// *AmbiguousError.
+func (c *Client) GetActorCost(ctx context.Context, atespace string, atespaceExplicit bool, target string) (*ActorMatch, error) {
+	target = strings.TrimSpace(target)
+	if parts := strings.SplitN(target, "/", 2); len(parts) == 2 {
+		atespace, target, atespaceExplicit = parts[0], parts[1], true
+	}
+	scope := ""
+	if atespaceExplicit {
+		scope = atespace
+	}
+	report, raw, err := c.GetCosts(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	var rawReport struct {
+		Actors   []json.RawMessage `json:"actors"`
+		Sessions []json.RawMessage `json:"sessions"`
+	}
+	if err := json.Unmarshal(raw, &rawReport); err != nil || len(rawReport.Actors) != len(report.Actors) || len(rawReport.Sessions) != len(report.Sessions) {
+		return nil, fmt.Errorf("decoding the FinOps cost report rows: %v", err)
+	}
+
+	inScope := func(a ActorCost) bool { return !atespaceExplicit || a.Atespace == atespace }
+	byName := func(onlyAtespace string) []int {
+		var out []int
+		for i, a := range report.Actors {
+			if a.Note == "" && a.Name == target && (onlyAtespace == "" || a.Atespace == onlyAtespace) {
+				out = append(out, i)
+			}
+		}
+		return out
+	}
+
+	matches := byName(atespace)
+	if len(matches) == 0 && !atespaceExplicit {
+		matches = byName("")
+	}
+	if len(matches) == 0 {
+		for i, a := range report.Actors {
+			if a.UID != "" && a.UID == target && inScope(a) {
+				matches = append(matches, i)
+			}
+		}
+	}
+	if len(matches) == 0 && len(target) >= MinUIDPrefix {
+		for i, a := range report.Actors {
+			if a.UID != "" && strings.HasPrefix(a.UID, target) && inScope(a) {
+				matches = append(matches, i)
+			}
+		}
+	}
+	switch len(matches) {
+	case 0:
+		where := target
+		if atespaceExplicit {
+			where = atespace + "/" + target
+		}
+		return nil, fmt.Errorf("no FinOps cost record found for %q", where)
+	case 1:
+	default:
+		var cands []string
+		for _, i := range matches {
+			a := report.Actors[i]
+			cands = append(cands, fmt.Sprintf("%s/%s uid=%s", a.Atespace, a.Name, a.UID))
+		}
+		return nil, &AmbiguousError{Target: target, Candidates: cands}
+	}
+
+	idx := matches[0]
+	matched := &report.Actors[idx]
+	m := &ActorMatch{Actor: matched, Raw: rawReport.Actors[idx], Report: report}
+	fullName := matched.Atespace + "/" + matched.Name
+	for i, s := range report.Sessions {
+		mine := s.ActorUID != "" && s.ActorUID == matched.UID
+		if s.ActorUID == "" || matched.UID == "" {
+			mine = s.Actor == fullName && (s.Atespace == "" || s.Atespace == matched.Atespace)
+		}
+		if mine {
+			m.Sessions = append(m.Sessions, rawReport.Sessions[i])
+			m.SessionCosts = append(m.SessionCosts, s)
+		}
+	}
+	for i, a := range report.Actors {
+		if i == idx || a.Note != "" || a.ParentAgentID == "" {
+			continue
+		}
+		if (matched.UID != "" && a.ParentAgentID == matched.UID) || a.ParentAgentID == fullName {
+			m.SubAgents = append(m.SubAgents, rawReport.Actors[i])
+			m.Children = append(m.Children, a)
+		}
+	}
+	return m, nil
+}
+
+// GetCurve fetches the < $1/agent-month hosting cost sensitivity curve from
+// GET /v1/costs/curve, decoded and as the server sent it.
+func (c *Client) GetCurve(ctx context.Context) (*CurveReport, []byte, error) {
 	var curve CurveReport
-	if err := c.getJSON(ctx, "/v1/costs/curve", &curve); err != nil {
-		return nil, err
+	raw, err := c.getJSON(ctx, "/v1/costs/curve", nil, &curve)
+	if err != nil {
+		return nil, nil, err
 	}
-	return &curve, nil
+	return &curve, raw, nil
 }
 
-// GetFocus fetches the FOCUS 1.3 split cost allocation report from GET /v1/costs/focus.
-func (c *Client) GetFocus(ctx context.Context) (*FocusReport, error) {
+// GetFocus fetches the FOCUS 1.3 split cost allocation report from
+// GET /v1/costs/focus, decoded and as the server sent it.
+func (c *Client) GetFocus(ctx context.Context, atespace string) (*FocusReport, []byte, error) {
 	var focus FocusReport
-	if err := c.getJSON(ctx, "/v1/costs/focus", &focus); err != nil {
-		return nil, err
+	raw, err := c.getJSON(ctx, "/v1/costs/focus", atespaceQuery(atespace), &focus)
+	if err != nil {
+		return nil, nil, err
 	}
-	return &focus, nil
+	return &focus, raw, nil
 }
 
 // GetFocusCSV fetches the FOCUS 1.3 split cost allocation rows in CSV format.
-func (c *Client) GetFocusCSV(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/costs/focus?format=csv", nil)
+func (c *Client) GetFocusCSV(ctx context.Context, atespace string) (string, error) {
+	q := atespaceQuery(atespace)
+	if q == nil {
+		q = url.Values{}
+	}
+	q.Set("format", "csv")
+	body, err := c.get(ctx, "/v1/costs/focus", q, "text/csv")
 	if err != nil {
 		return "", err
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("requesting %s/v1/costs/focus?format=csv: %w", c.baseURL, err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GET %s/v1/costs/focus?format=csv returned HTTP %d: %s", c.baseURL, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return string(body), nil
 }
 
-func (c *Client) getJSON(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return err
+func atespaceQuery(atespace string) url.Values {
+	if atespace == "" {
+		return nil
 	}
-	req.Header.Set("Accept", "application/json")
+	return url.Values{"atespace": {atespace}}
+}
+
+func (c *Client) get(ctx context.Context, path string, query url.Values, accept string) ([]byte, error) {
+	u := c.baseURL + path
+	if len(query) > 0 {
+		u += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", accept)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("requesting %s%s: %w", c.baseURL, path, err)
+		return nil, fmt.Errorf("requesting %s: %w", u, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s%s returned HTTP %d: %s", c.baseURL, path, resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("GET %s returned HTTP %d: %s", u, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return body, nil
+}
+
+func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out any) ([]byte, error) {
+	body, err := c.get(ctx, path, query, "application/json")
+	if err != nil {
+		return nil, err
 	}
 	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("decoding %s%s: %w", c.baseURL, path, err)
+		return nil, fmt.Errorf("decoding %s%s: %w", c.baseURL, path, err)
 	}
-	return nil
+	return body, nil
 }

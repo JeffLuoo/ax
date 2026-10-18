@@ -15,8 +15,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +30,7 @@ import (
 	"github.com/google/ax/internal/finops"
 	"github.com/google/ax/internal/tunnel"
 	"github.com/google/ax/pkg/apis/v1alpha1"
+	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,8 +42,15 @@ const costUsage = `Usage:
   ax cost focus [-o table|json|csv|yaml]
 
 Query Agent FinOps cost attribution, 3-number hosting cost breakdown
-(booked-share vs. measured-usage), per-session spend, the < $1/agent-month
-hosting sensitivity curve, and FOCUS 1.3 split cost allocation rows.
+(booked-share vs. measured-usage), per-session spend, task budgets and
+outcomes, the < $1/agent-month hosting sensitivity curve, and FOCUS 1.3
+split cost allocation rows.
+
+-a limits the query to one atespace, on the server; without -a, the default
+atespace is shown, or all atespaces when it is empty. A task or actor is a
+name, "<atespace>/<name>", an actor UID, or a unique UID prefix of at least
+8 characters. -o json and -o yaml print the FinOps server's response as it
+came. Numbers from rate card prices are labeled ESTIMATE — NOT RECONCILED.
 
 Examples:
   ax cost -a otel-bench
@@ -126,8 +136,10 @@ func parseCostArgs(args []string) (costOptions, error) {
 	return opts, nil
 }
 
-// runCost executes `ax cost ...` against the FinOps HTTP server and optionally
-// enriches task phases from the AX server when axServerURL is non-empty.
+// runCost executes `ax cost ...` against the FinOps HTTP server and joins task
+// phases, budgets, and outcomes from the AX server when axServerURL is set.
+// atespaceExplicit is true when the user passed -a; then nothing outside that
+// atespace is shown or matched.
 func runCost(finopsURL, axServerURL, atespace string, atespaceExplicit bool, args []string) error {
 	opts, err := parseCostArgs(args)
 	if err != nil {
@@ -137,6 +149,7 @@ func runCost(finopsURL, axServerURL, atespace string, atespaceExplicit bool, arg
 		fmt.Println(costUsage)
 		return nil
 	}
+	out := os.Stdout
 
 	client := finops.NewClient(finopsURL, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -144,273 +157,375 @@ func runCost(finopsURL, axServerURL, atespace string, atespaceExplicit bool, arg
 
 	switch opts.subcmd {
 	case "curve":
-		curve, err := client.GetCurve(ctx)
+		curve, raw, err := client.GetCurve(ctx)
 		if err != nil {
 			return err
 		}
-		return renderCurveReport(os.Stdout, curve, opts.output)
+		if isStructured(opts.output) {
+			return writeRaw(out, raw, opts.output)
+		}
+		return renderCurveReport(out, curve)
 
 	case "focus":
+		scope := ""
+		if atespaceExplicit && !opts.allAtespaces {
+			scope = atespace
+		}
 		if opts.output == "csv" {
-			csvData, err := client.GetFocusCSV(ctx)
+			csvData, err := client.GetFocusCSV(ctx, scope)
 			if err != nil {
 				return err
 			}
-			_, err = io.WriteString(os.Stdout, csvData)
+			_, err = io.WriteString(out, csvData)
 			return err
 		}
-		focus, err := client.GetFocus(ctx)
+		focus, raw, err := client.GetFocus(ctx, scope)
 		if err != nil {
 			return err
 		}
-		return renderFocusReport(os.Stdout, focus, opts.output)
+		if isStructured(opts.output) {
+			return writeRaw(out, raw, opts.output)
+		}
+		return renderFocusReport(out, focus)
 
 	case "get":
-		scopeAtespace := atespace
-		if opts.allAtespaces || !atespaceExplicit {
-			// If the user did not explicitly pass -a, prefer matching in the default
-			// atespace first, then fall back across all atespaces in GetActorCost.
-			scopeAtespace = atespace
-		}
-		actor, sessions, children, _, err := client.GetActorCost(ctx, scopeAtespace, opts.target)
+		m, err := client.GetActorCost(ctx, atespace, atespaceExplicit && !opts.allAtespaces, opts.target)
 		if err != nil {
 			return err
 		}
-		phase := lookupAXTaskPhase(ctx, axServerURL, actor.Atespace, actor.Name)
-		return renderActorDetail(os.Stdout, actor, phase, sessions, children, opts.output)
+		task := lookupAXTask(ctx, axServerURL, m.Actor.Atespace, m.Actor.Name)
+		return renderActorDetail(out, m, task, opts.output)
 
 	default:
-		report, err := client.GetCosts(ctx)
+		scope := ""
+		if !opts.allAtespaces {
+			scope = atespace
+		}
+		report, raw, err := client.GetCosts(ctx, scope)
 		if err != nil {
 			return err
 		}
-		filterAtespace := ""
-		if !opts.allAtespaces && atespaceExplicit {
-			filterAtespace = atespace
-		} else if !opts.allAtespaces && hasActorsInAtespace(report.Actors, atespace) {
-			filterAtespace = atespace
+		// Without -a, an empty default atespace shows every atespace.
+		if !opts.allAtespaces && !atespaceExplicit && len(report.Actors) == 0 {
+			scope = ""
+			if report, raw, err = client.GetCosts(ctx, ""); err != nil {
+				return err
+			}
 		}
-		phases := lookupAXTaskPhases(ctx, axServerURL, filterAtespace)
-		return renderCostList(os.Stdout, report, filterAtespace, phases, opts.output)
+		if isStructured(opts.output) {
+			return writeRaw(out, raw, opts.output)
+		}
+		tasks := lookupAXTasks(ctx, axServerURL, scope)
+		return renderCostList(out, report, scope, tasks, opts.output == "wide")
 	}
 }
 
-func hasActorsInAtespace(actors []finops.ActorCost, atespace string) bool {
-	if atespace == "" {
-		return false
-	}
-	for _, a := range actors {
-		if a.Atespace == atespace {
-			return true
-		}
-	}
-	return false
-}
+func isStructured(format string) bool { return format == "json" || format == "yaml" }
 
-// lookupAXTaskPhases opportunistically queries the AX gRPC server for task
-// phases if axServerURL is reachable. Errors are ignored so `ax cost` works on
-// clusters running Substrate + FinOps without ax-server.
-func lookupAXTaskPhases(ctx context.Context, axServerURL, atespace string) map[string]string {
+// lookupAXTasks opportunistically lists the AX tasks, keyed by
+// "<atespace>/<name>", when axServerURL is reachable. Errors are ignored so
+// that `ax cost` works on clusters that run Substrate and FinOps without
+// ax-server.
+func lookupAXTasks(ctx context.Context, axServerURL, atespace string) map[string]*v1alpha1.Task {
 	if axServerURL == "" {
 		return nil
 	}
-	qCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	qCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	client, conn, err := getAXClient(axServerURL)
 	if err != nil {
 		return nil
 	}
 	defer conn.Close()
-	resp, err := client.ListTasks(qCtx, &v1alpha1.ListTasksRequest{Atespace: atespace})
-	if err != nil {
-		return nil
+	const page = 500
+	tasks := map[string]*v1alpha1.Task{}
+	for offset := int64(0); ; offset += page {
+		resp, err := client.ListTasks(qCtx, &v1alpha1.ListTasksRequest{Atespace: atespace, Limit: page, Offset: offset})
+		if err != nil {
+			if len(tasks) == 0 {
+				return nil
+			}
+			return tasks
+		}
+		for _, t := range resp.Tasks {
+			if t.GetMetadata() != nil {
+				tasks[t.GetMetadata().GetAtespace()+"/"+t.GetMetadata().GetName()] = t
+			}
+		}
+		if len(resp.Tasks) < page {
+			return tasks
+		}
 	}
-	phases := make(map[string]string, len(resp.Tasks))
-	for _, t := range resp.Tasks {
-		if t.Metadata == nil {
-			continue
-		}
-		phase := "Pending"
-		if t.Status != nil && t.Status.Phase != "" {
-			phase = t.Status.Phase
-		}
-		phases[t.Metadata.Atespace+"/"+t.Metadata.Name] = phase
-		if t.Status != nil && t.Status.Actor != "" {
-			phases[t.Metadata.Atespace+"/"+t.Status.Actor] = phase
-		}
-	}
-	return phases
 }
 
-func lookupAXTaskPhase(ctx context.Context, axServerURL, atespace, name string) string {
+func lookupAXTask(ctx context.Context, axServerURL, atespace, name string) *v1alpha1.Task {
 	if axServerURL == "" {
-		return ""
+		return nil
 	}
 	qCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
 	client, conn, err := getAXClient(axServerURL)
 	if err != nil {
-		return ""
+		return nil
 	}
 	defer conn.Close()
 	t, err := client.GetTask(qCtx, &v1alpha1.GetTaskRequest{Atespace: atespace, Name: name})
-	if err != nil || t == nil || t.Status == nil {
-		return ""
+	if err != nil {
+		return nil
 	}
-	return t.Status.Phase
+	return t
 }
 
-func renderCostList(out io.Writer, report *finops.CostReport, filterAtespace string, phases map[string]string, outputFormat string) error {
-	filtered := make([]finops.ActorCost, 0, len(report.Actors))
-	for _, a := range report.Actors {
-		if filterAtespace != "" && a.Atespace != filterAtespace {
-			continue
+// taskView is what the CLI shows about an actor's task: the AX server's
+// record when it is reachable, else what FinOps reports.
+type taskView struct {
+	name, parent, phase, outcome string
+	budgetUSD                    float64
+	exitCode                     *int32
+	finishedAt                   string
+}
+
+func viewTask(a *finops.ActorCost, task *v1alpha1.Task) *taskView {
+	switch {
+	case task != nil:
+		v := &taskView{
+			name:      task.GetMetadata().GetName(),
+			parent:    task.GetSpec().GetParent(),
+			phase:     task.GetStatus().GetPhase(),
+			outcome:   task.GetStatus().GetOutcome(),
+			budgetUSD: task.GetSpec().GetBudget().GetMaxUsd(),
 		}
-		filtered = append(filtered, a)
+		if v.outcome != "" {
+			code := task.GetStatus().GetExitCode()
+			v.exitCode = &code
+			if f := task.GetStatus().GetFinishedAt(); f != nil {
+				v.finishedAt = f.AsTime().UTC().Format(time.RFC3339)
+			}
+		}
+		return v
+	case a != nil && a.Task != nil:
+		return &taskView{name: a.Task.Name, parent: a.Task.Parent, outcome: a.Task.Outcome, budgetUSD: a.Task.BudgetUSD, exitCode: a.Task.ExitCode}
+	}
+	return nil
+}
+
+// overBudget reports whether spend passes a set budget.
+func overBudget(spend, budget float64) bool { return budget > 0 && spend > budget }
+
+func renderCostList(out io.Writer, report *finops.CostReport, scope string, tasks map[string]*v1alpha1.Task, wide bool) error {
+	rows := report.Actors
+	serverFiltered := scope == "" || report.Atespace == scope
+	if !serverFiltered {
+		// An older server ignores ?atespace=; show only the rows in scope.
+		rows = nil
+		for _, a := range report.Actors {
+			if a.Atespace == scope {
+				rows = append(rows, a)
+			}
+		}
 	}
 
-	if outputFormat == "json" || outputFormat == "yaml" {
-		outReport := *report
-		outReport.Actors = filtered
-		return encodeStructured(out, outReport, outputFormat)
+	views := make([]*taskView, len(rows))
+	hasTasks := false
+	for i := range rows {
+		views[i] = viewTask(&rows[i], tasks[rows[i].Atespace+"/"+rows[i].Name])
+		if views[i] != nil {
+			hasTasks = true
+		}
+	}
+
+	cols := []string{"NAME", "ATESPACE"}
+	if len(tasks) > 0 {
+		cols = append(cols, "PHASE")
+	}
+	if hasTasks {
+		cols = append(cols, "OUTCOME")
+	}
+	cols = append(cols, "CLASS", "TEMPLATE")
+	if wide {
+		cols = append(cols, "UID")
+	}
+	cols = append(cols, "CALLS", "TOKENS(IN/OUT)", "LLM($)", "HOSTING($)", "OWN-LOADED($)")
+	if wide {
+		cols = append(cols, "MEASURED($)", "SUB-AGENTS")
+	}
+	cols = append(cols, "TREE-LOADED($)")
+	if hasTasks {
+		cols = append(cols, "SPEND/BUDGET($)")
 	}
 
 	w := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-	hasPhases := len(phases) > 0
-	wide := outputFormat == "wide"
-
-	switch {
-	case wide && hasPhases:
-		fmt.Fprintln(w, "NAME\tATESPACE\tPHASE\tCLASS\tTEMPLATE\tUID\tCALLS\tTOKENS(IN/OUT)\tLLM($)\tHOSTING($)\tOWN-LOADED($)\tMEASURED($)\tSUB-AGENTS\tTREE-LOADED($)")
-	case wide:
-		fmt.Fprintln(w, "NAME\tATESPACE\tCLASS\tTEMPLATE\tUID\tCALLS\tTOKENS(IN/OUT)\tLLM($)\tHOSTING($)\tOWN-LOADED($)\tMEASURED($)\tSUB-AGENTS\tTREE-LOADED($)")
-	case hasPhases:
-		fmt.Fprintln(w, "NAME\tATESPACE\tPHASE\tCLASS\tTEMPLATE\tCALLS\tTOKENS(IN/OUT)\tLLM($)\tHOSTING($)\tOWN-LOADED($)\tTREE-LOADED($)")
-	default:
-		fmt.Fprintln(w, "NAME\tATESPACE\tCLASS\tTEMPLATE\tCALLS\tTOKENS(IN/OUT)\tLLM($)\tHOSTING($)\tOWN-LOADED($)\tTREE-LOADED($)")
-	}
-
-	var (
-		sumCalls   int64
-		sumIn      int64
-		sumOut     int64
-		sumLLM     float64
-		sumHosting float64
-		sumLoaded  float64
-	)
-
-	for _, a := range filtered {
-		class := a.Class
-		if class == "" {
-			if a.IsAgent {
-				class = "agent"
-			} else {
-				class = "shared"
+	fmt.Fprintln(w, strings.Join(cols, "\t"))
+	for i, a := range rows {
+		name, atespace, class := a.Name, a.Atespace, actorClass(a)
+		if a.Note != "" {
+			name, atespace, class = "("+a.Note+")", "-", "-"
+		}
+		v := views[i]
+		cells := []string{name, atespace}
+		if len(tasks) > 0 {
+			phase := "-"
+			if t := tasks[a.Atespace+"/"+a.Name]; t != nil {
+				phase = firstNonEmpty(t.GetStatus().GetPhase(), "Pending")
 			}
+			cells = append(cells, phase)
 		}
-		tmpl := a.Template
-		if tmpl == "" {
-			tmpl = "-"
+		if hasTasks {
+			outcome := "-"
+			if v != nil && v.outcome != "" {
+				outcome = v.outcome
+			}
+			cells = append(cells, outcome)
 		}
-		uid := a.UID
-		if uid == "" {
-			uid = "-"
+		cells = append(cells, class, firstNonEmpty(a.Template, "-"))
+		if wide {
+			cells = append(cells, firstNonEmpty(a.UID, "-"))
 		}
-		phase := phases[a.Atespace+"/"+a.Name]
-		if phase == "" {
-			phase = "-"
+		cells = append(cells, fmt.Sprint(a.Calls), fmt.Sprintf("%d/%d", a.InputTokens, a.OutputTokens),
+			formatUSD(a.Cost.USD()), formatUSD(a.HostingCost.USD()), formatUSD(a.FullyLoadedCost.USD()))
+		if wide {
+			cells = append(cells, formatUSD(a.MeasuredFullyLoadedCost.USD()), fmt.Sprint(a.SubAgents))
 		}
-		tokens := fmt.Sprintf("%d/%d", a.InputTokens, a.OutputTokens)
-		llmUSD := a.Cost.USD()
-		hostingUSD := a.HostingCost.USD()
-		if hostingUSD == 0 {
-			hostingUSD = a.VariableHostingUSD() + a.SharedOverheadUSD()
+		cells = append(cells, formatUSD(a.TreeFullyLoadedCost.USD()))
+		if hasTasks {
+			cell := "-"
+			if v != nil && v.budgetUSD > 0 {
+				cell = formatUSD(a.TotalCost.USD()) + "/" + formatUSD(v.budgetUSD)
+				if overBudget(a.TotalCost.USD(), v.budgetUSD) {
+					cell += " OVER"
+				}
+			}
+			cells = append(cells, cell)
 		}
-		ownLoadedUSD := a.FullyLoadedCost.USD()
-		if ownLoadedUSD == 0 {
-			ownLoadedUSD = llmUSD + hostingUSD
-		}
-		measuredLoadedUSD := a.MeasuredFullyLoadedCost.USD()
-		if measuredLoadedUSD == 0 {
-			measuredLoadedUSD = llmUSD + a.MeasuredHostingCost.USD()
-		}
-		treeLoadedUSD := a.TreeFullyLoadedCost.USD()
-		if treeLoadedUSD == 0 {
-			treeLoadedUSD = ownLoadedUSD
-		}
-
-		sumCalls += a.Calls
-		sumIn += a.InputTokens
-		sumOut += a.OutputTokens
-		sumLLM += llmUSD
-		sumHosting += hostingUSD
-		sumLoaded += ownLoadedUSD
-
-		switch {
-		case wide && hasPhases:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
-				a.Name, a.Atespace, phase, class, tmpl, uid, a.Calls, tokens,
-				formatUSD(llmUSD), formatUSD(hostingUSD), formatUSD(ownLoadedUSD),
-				formatUSD(measuredLoadedUSD), a.SubAgents, formatUSD(treeLoadedUSD))
-		case wide:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
-				a.Name, a.Atespace, class, tmpl, uid, a.Calls, tokens,
-				formatUSD(llmUSD), formatUSD(hostingUSD), formatUSD(ownLoadedUSD),
-				formatUSD(measuredLoadedUSD), a.SubAgents, formatUSD(treeLoadedUSD))
-		case hasPhases:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
-				a.Name, a.Atespace, phase, class, tmpl, a.Calls, tokens,
-				formatUSD(llmUSD), formatUSD(hostingUSD), formatUSD(ownLoadedUSD),
-				formatUSD(treeLoadedUSD))
-		default:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
-				a.Name, a.Atespace, class, tmpl, a.Calls, tokens,
-				formatUSD(llmUSD), formatUSD(hostingUSD), formatUSD(ownLoadedUSD),
-				formatUSD(treeLoadedUSD))
-		}
+		fmt.Fprintln(w, strings.Join(cells, "\t"))
 	}
 	if err := w.Flush(); err != nil {
 		return err
 	}
 
 	scopeLabel := "all atespaces"
-	if filterAtespace != "" {
-		scopeLabel = "atespace " + filterAtespace
+	if scope != "" {
+		scopeLabel = "atespace " + scope
 	}
-	fmt.Fprintf(out, "\nSummary (%s, %d actors): calls=%d tokens=%d/%d llm=%s hosting=%s fully_loaded=%s\n",
-		scopeLabel, len(filtered), sumCalls, sumIn, sumOut,
-		formatUSD(sumLLM), formatUSD(sumHosting), formatUSD(sumLoaded))
+	if serverFiltered {
+		t := report.Totals
+		fmt.Fprintf(out, "\nSummary (%s, %d rows): calls=%d tokens=%d/%d llm=%s compute=%s total=%s fully_loaded=%s\n",
+			scopeLabel, len(rows), t.Calls, t.InputTokens, t.OutputTokens,
+			formatUSD(t.Cost.USD()), formatUSD(report.Compute.Cost.USD()),
+			formatUSD(report.TotalCost.USD()), formatUSD(report.FullyLoadedCost.USD()))
+	} else {
+		fmt.Fprintf(out, "\nSummary (%s, %d rows): the server did not filter by atespace, so it sent no totals for this atespace\n", scopeLabel, len(rows))
+	}
+	if oc := report.OutcomeCosts; oc != nil {
+		fmt.Fprintf(out, "By task outcome (own LLM + compute): completed=%s (%d tasks) failed=%s (%d tasks) unfinished=%s (%d tasks) no-task=%s\n",
+			formatUSD(oc.Completed.TotalCost.USD()), oc.Completed.Tasks,
+			formatUSD(oc.Failed.TotalCost.USD()), oc.Failed.Tasks,
+			formatUSD(oc.Unfinished.TotalCost.USD()), oc.Unfinished.Tasks,
+			formatUSD(oc.NoTask.TotalCost.USD()))
+	}
+	printCostBasis(out, report.Estimated())
+	printCostWarnings(out, report.Totals, report.Compute, noteRows(rows))
 	return nil
 }
 
-type actorDetailExport struct {
-	Actor     *finops.ActorCost    `json:"actor" yaml:"actor"`
-	Phase     string               `json:"phase,omitempty" yaml:"phase,omitempty"`
-	Sessions  []finops.SessionCost `json:"sessions,omitempty" yaml:"sessions,omitempty"`
-	SubAgents []finops.ActorCost   `json:"subAgents,omitempty" yaml:"subAgents,omitempty"`
+func actorClass(a finops.ActorCost) string {
+	if a.Class != "" {
+		return a.Class
+	}
+	if a.IsAgent {
+		return "agent"
+	}
+	return "shared"
 }
 
-func renderActorDetail(out io.Writer, a *finops.ActorCost, phase string, sessions []finops.SessionCost, children []finops.ActorCost, outputFormat string) error {
-	if outputFormat == "json" || outputFormat == "yaml" {
-		return encodeStructured(out, actorDetailExport{
-			Actor:     a,
-			Phase:     phase,
-			Sessions:  sessions,
-			SubAgents: children,
-		}, outputFormat)
-	}
-
-	class := a.Class
-	if class == "" {
-		if a.IsAgent {
-			class = "agent"
-		} else {
-			class = "shared"
+func noteRows(rows []finops.ActorCost) []finops.ActorCost {
+	var out []finops.ActorCost
+	for _, a := range rows {
+		if a.Note != "" {
+			out = append(out, a)
 		}
 	}
+	return out
+}
+
+// estimateLabel marks numbers that come from rate card prices and that no bill
+// has confirmed.
+const estimateLabel = "ESTIMATE — NOT RECONCILED"
+
+func printCostBasis(out io.Writer, estimated bool) {
+	if estimated {
+		fmt.Fprintf(out, "Cost basis: %s (rate card prices; no bill was reconciled)\n", estimateLabel)
+	}
+}
+
+// printCostWarnings prints one warning line when some spend is not in the
+// numbers: calls with unknown or no price, leases with no price, non-ok usage
+// reports, or spend that FinOps could not put on an actor.
+func printCostWarnings(out io.Writer, totals finops.Totals, compute finops.ComputeSummary, notes []finops.ActorCost) {
+	var parts []string
+	if n := totals.UnknownCostCalls; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d calls with unknown cost (no usage report)", n))
+	}
+	if n := totals.UnpricedCalls; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d calls with no price", n))
+	}
+	if n := compute.UnpricedLeases; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d leases with no price", n))
+	}
+	var bad []string
+	for status, n := range totals.UsageStatus {
+		if status != "ok" && n > 0 {
+			bad = append(bad, fmt.Sprintf("%s=%d", status, n))
+		}
+	}
+	sort.Strings(bad)
+	if len(bad) > 0 {
+		parts = append(parts, "usage status "+strings.Join(bad, " "))
+	}
+	for _, a := range notes {
+		parts = append(parts, fmt.Sprintf("%s: %d calls, %s", a.Note, a.Calls, formatUSD(a.TotalCost.USD())))
+	}
+	if len(parts) > 0 {
+		fmt.Fprintf(out, "Warning: these numbers leave out spend: %s\n", strings.Join(parts, "; "))
+	}
+}
+
+// actorDetailExport is the -o json/yaml form of `ax cost task`. The FinOps
+// rows are the server's JSON as it came; axTask is the AX server's task.
+type actorDetailExport struct {
+	Actor     json.RawMessage   `json:"actor"`
+	Phase     string            `json:"phase,omitempty"`
+	AXTask    json.RawMessage   `json:"axTask,omitempty"`
+	CostBasis string            `json:"costBasis,omitempty"`
+	Sessions  []json.RawMessage `json:"sessions,omitempty"`
+	SubAgents []json.RawMessage `json:"subAgents,omitempty"`
+}
+
+func renderActorDetail(out io.Writer, m *finops.ActorMatch, task *v1alpha1.Task, outputFormat string) error {
+	a := m.Actor
+	if isStructured(outputFormat) {
+		exp := actorDetailExport{
+			Actor:     m.Raw,
+			Phase:     task.GetStatus().GetPhase(),
+			CostBasis: m.Report.CostBasis,
+			Sessions:  m.Sessions,
+			SubAgents: m.SubAgents,
+		}
+		if task != nil {
+			if b, err := protojson.Marshal(task); err == nil {
+				exp.AXTask = b
+			}
+		}
+		raw, err := json.MarshalIndent(exp, "", "  ")
+		if err != nil {
+			return err
+		}
+		return writeRaw(out, raw, outputFormat)
+	}
+
 	fmt.Fprintf(out, "Name:               %s\n", a.Name)
 	fmt.Fprintf(out, "Atespace:           %s\n", a.Atespace)
-	if phase != "" {
+	if phase := task.GetStatus().GetPhase(); phase != "" {
 		fmt.Fprintf(out, "Task Phase:         %s\n", phase)
 	}
 	if a.UID != "" {
@@ -419,25 +534,66 @@ func renderActorDetail(out io.Writer, a *finops.ActorCost, phase string, session
 	if a.Template != "" {
 		fmt.Fprintf(out, "Template:           %s (ate.template.name)\n", a.Template)
 	}
-	fmt.Fprintf(out, "Class:              %s (is_agent=%t)\n", class, a.IsAgent)
+	fmt.Fprintf(out, "Class:              %s (is_agent=%t)\n", actorClass(*a), a.IsAgent)
 	if a.Tenant != "" {
 		fmt.Fprintf(out, "Tenant:             %s (ate.finops.tenant)\n", a.Tenant)
 	}
 	if a.ParentAgentID != "" {
-		fmt.Fprintf(out, "Parent Agent UID:   %s (gen_ai.agent.parent_id)\n", a.ParentAgentID)
+		fmt.Fprintf(out, "Parent Agent:       %s (gen_ai.agent.parent_id)\n", a.ParentAgentID)
 	}
 	fmt.Fprintf(out, "Sub-Agents:         %d\n", a.SubAgents)
+	printTaskBudget(out, a, viewTask(a, task))
 
-	printActorCostSections(out, a, sessions, children)
+	printActorCostSections(out, a, m.SessionCosts, m.Children)
+	fmt.Fprintln(out)
+	printCostBasis(out, m.Report.Estimated())
+	printCostWarnings(out, finops.Totals{UnknownCostCalls: a.UnknownCostCalls, UnpricedCalls: a.UnpricedCalls, UsageStatus: a.UsageStatus}, a.Compute, nil)
 	return nil
 }
 
+// printTaskBudget prints the task's place in the tree, its outcome, and its
+// spend (LLM plus compute) against its budget.
+func printTaskBudget(out io.Writer, a *finops.ActorCost, v *taskView) {
+	if v == nil {
+		return
+	}
+	if v.parent != "" {
+		fmt.Fprintf(out, "Parent Task:        %s\n", v.parent)
+	}
+	switch {
+	case v.outcome != "" && v.exitCode != nil:
+		finished := ""
+		if v.finishedAt != "" {
+			finished = ", finished " + v.finishedAt
+		}
+		fmt.Fprintf(out, "Outcome:            %s (exit code %d%s)\n", v.outcome, *v.exitCode, finished)
+	case v.outcome != "":
+		fmt.Fprintf(out, "Outcome:            %s\n", v.outcome)
+	default:
+		fmt.Fprintf(out, "Outcome:            - (the command has not exited)\n")
+	}
+	own, tree := a.TotalCost.USD(), a.TreeTotalCost.USD()
+	if v.budgetUSD <= 0 {
+		fmt.Fprintf(out, "Budget:             none\n")
+		fmt.Fprintf(out, "Spend (LLM+compute): own %s, tree %s\n", formatUSD(own), formatUSD(tree))
+		return
+	}
+	fmt.Fprintf(out, "Budget:             %s\n", formatUSD(v.budgetUSD))
+	flag := ""
+	switch {
+	case overBudget(own, v.budgetUSD):
+		flag = "  OVER BUDGET"
+	case overBudget(tree, v.budgetUSD):
+		flag = "  OVER BUDGET (with sub-agents)"
+	}
+	fmt.Fprintf(out, "Spend (LLM+compute): own %s (%.1f%% of budget), tree %s (%.1f%%)%s\n",
+		formatUSD(own), 100*own/v.budgetUSD, formatUSD(tree), 100*tree/v.budgetUSD, flag)
+}
 func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finops.SessionCost, children []finops.ActorCost) {
+	// The server computes every total; the CLI shows its numbers and does not
+	// fill a missing one with its own sum.
 	bookedCompute := a.Compute.Cost.USD()
 	measuredCompute := a.MeasuredComputeCost.USD()
-	if measuredCompute == 0 {
-		measuredCompute = a.Compute.MeasuredCost.USD()
-	}
 	storageUSD := a.StorageCost.USD()
 	egressUSD := a.EgressCost.USD()
 	varBooked := a.VariableHostingUSD()
@@ -445,16 +601,10 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 
 	idleUSD := a.IdleShareCost.USD()
 	platformUSD := a.PlatformShareCost.USD()
-	sharedUSD := a.SharedOverheadUSD()
+	sharedUSD := idleUSD + platformUSD
 
 	hostingBooked := a.HostingCost.USD()
-	if hostingBooked == 0 {
-		hostingBooked = varBooked + sharedUSD
-	}
 	hostingMeasured := a.MeasuredHostingCost.USD()
-	if hostingMeasured == 0 {
-		hostingMeasured = varMeasured + sharedUSD
-	}
 
 	fmt.Fprintln(out, "\nHosting Cost Breakdown (Three-Number Attribution):")
 	hw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
@@ -499,33 +649,15 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 	_ = mw.Flush()
 
 	ownDirect := a.TotalCost.USD()
-	if ownDirect == 0 {
-		ownDirect = a.Cost.USD() + varBooked
-	}
 	ownLoaded := a.FullyLoadedCost.USD()
-	if ownLoaded == 0 {
-		ownLoaded = a.Cost.USD() + hostingBooked
-	}
 	ownMeasuredLoaded := a.MeasuredFullyLoadedCost.USD()
-	if ownMeasuredLoaded == 0 {
-		ownMeasuredLoaded = a.Cost.USD() + hostingMeasured
-	}
 	treeLLM := a.TreeLLMCost.USD()
-	if treeLLM == 0 {
-		treeLLM = a.Cost.USD()
-	}
 	treeDirect := a.TreeTotalCost.USD()
-	if treeDirect == 0 {
-		treeDirect = ownDirect
-	}
 	treeLoaded := a.TreeFullyLoadedCost.USD()
-	if treeLoaded == 0 {
-		treeLoaded = ownLoaded
-	}
 
 	fmt.Fprintln(out, "\nTotal Cost Summary (Own vs. Sub-Agent Tree):")
 	tw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "  SCOPE\tLLM ($)\tDIRECT TOTAL ($)\tFULLY LOADED (BOOKED $)\tFULLY LOADED (MEASURED $)")
+	fmt.Fprintln(tw, "  SCOPE\tLLM ($)\tLLM + COMPUTE ($)\tFULLY LOADED (BOOKED $)\tFULLY LOADED (MEASURED $)")
 	fmt.Fprintf(tw, "  Own (%s/%s)\t%s\t%s\t%s\t%s\n",
 		a.Atespace, a.Name, formatUSD(a.Cost.USD()), formatUSD(ownDirect), formatUSD(ownLoaded), formatUSD(ownMeasuredLoaded))
 	if a.SubAgents > 0 || len(children) > 0 || treeLoaded > ownLoaded {
@@ -535,7 +667,7 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 	_ = tw.Flush()
 
 	if len(children) > 0 {
-		fmt.Fprintln(out, "\nSub-Agents (gen_ai.agent.parent_id == Actor UID):")
+		fmt.Fprintln(out, "\nSub-Agents (gen_ai.agent.parent_id names this actor):")
 		cw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
 		fmt.Fprintln(cw, "  NAME\tATESPACE\tUID\tTEMPLATE\tCALLS\tLLM ($)\tHOSTING ($)\tFULLY LOADED ($)")
 		for _, c := range children {
@@ -568,11 +700,7 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 	}
 }
 
-func renderCurveReport(out io.Writer, curve *finops.CurveReport, outputFormat string) error {
-	if outputFormat == "json" || outputFormat == "yaml" {
-		return encodeStructured(out, curve, outputFormat)
-	}
-
+func renderCurveReport(out io.Writer, curve *finops.CurveReport) error {
 	fmt.Fprintf(out, "Hosting Cost Sensitivity Curve (< $%.2f / agent-month claim)\n", curve.TargetUSD)
 	fmt.Fprintf(out, "  Pool Utilization:      %.0f%%\n", curve.PoolUtilization*100.0)
 	fmt.Fprintf(out, "  Storage / Agent-Mo:    %s\n", formatUSD(curve.StoragePerAgentUSD))
@@ -637,84 +765,179 @@ func renderCurveReport(out io.Writer, curve *finops.CurveReport, outputFormat st
 	return nil
 }
 
-func renderFocusReport(out io.Writer, focus *finops.FocusReport, outputFormat string) error {
-	if outputFormat == "json" || outputFormat == "yaml" {
-		return encodeStructured(out, focus, outputFormat)
-	}
-
+func renderFocusReport(out io.Writer, focus *finops.FocusReport) error {
+	estimated := focus.Estimated()
 	oc := focus.OriginCharge
 	fmt.Fprintf(out, "FOCUS 1.3 Split Cost Allocation Report\n")
+	if estimated {
+		fmt.Fprintf(out, "  Cost Basis:      %s (the origin comes from rate card prices, not from the bill)\n", estimateLabel)
+	}
 	if oc.OriginChargeID != "" {
-		fmt.Fprintf(out, "  Origin Charge:   %s (%s, resource=%s, billed=%s %s)\n",
-			oc.OriginChargeID, oc.ServiceName, oc.ResourceName, formatUSD(oc.BilledCost), oc.BillingCurrency)
+		fmt.Fprintf(out, "  Origin Charge:   %s (%s, resource=%s, effective=%s, billed=%s %s)\n",
+			oc.OriginChargeID, oc.ServiceName, oc.ResourceName, formatUSD(oc.EffectiveCost), formatUSD(oc.BilledCost), oc.BillingCurrency)
 	}
 	if r := focus.Reconciliation; r != nil {
 		status := "OK"
-		if len(r.Problems) > 0 {
+		switch {
+		case estimated && len(r.Problems) > 0:
+			status = "NOT CHECKED AGAINST A BILL; PROBLEMS: " + strings.Join(r.Problems, "; ")
+		case estimated:
+			status = "NOT CHECKED AGAINST A BILL"
+		case len(r.Problems) > 0:
 			status = "PROBLEMS: " + strings.Join(r.Problems, "; ")
 		}
-		fmt.Fprintf(out, "  Reconciliation:  origin=%s allocated=%s unallocated(_unused_capacity)=%s agents=%d unsized_leases=%d status=%s\n\n",
-			formatUSD(r.OriginCost), formatUSD(r.Allocated), formatUSD(r.Unallocated),
-			r.Agents, r.UnsizedLeases, status)
+		fmt.Fprintf(out, "  Reconciliation:  origin=%s allocated=%s unallocated(_unused_capacity)=%s agents=%d unsized_leases=%d\n",
+			formatUSD(r.OriginCost), formatUSD(r.Allocated), formatUSD(r.Unallocated), r.Agents, r.UnsizedLeases)
+		var checks []string
+		if r.ExpectedIdle != nil {
+			checks = append(checks, "expected_idle="+formatUSD(*r.ExpectedIdle))
+		}
+		if g := r.PriceGapValue(); g != nil {
+			checks = append(checks, "price_gap="+formatUSD(*g)+" (bill vs. capacity at rate card prices; does not depend on the leases)")
+		}
+		if r.CoverageLeaseHours != nil && r.CoverageActivationHours != nil {
+			c := fmt.Sprintf("coverage=%.4f lease-h / %.4f activation-h", *r.CoverageLeaseHours, *r.CoverageActivationHours)
+			if r.CoverageRatio != nil {
+				c += fmt.Sprintf(" (ratio %.4f)", *r.CoverageRatio)
+			}
+			checks = append(checks, c)
+		}
+		if len(checks) > 0 {
+			fmt.Fprintf(out, "                   %s\n", strings.Join(checks, " "))
+		}
+		fmt.Fprintf(out, "  Status:          %s\n", status)
+		if r.EstimatedLeases > 0 {
+			fmt.Fprintf(out, "  Estimated Leases: %d (a start or end that no lifecycle record showed)\n", r.EstimatedLeases)
+		}
+		if len(focus.Reconciliations) > 1 {
+			fmt.Fprintln(out, "  Per Pool:")
+			for _, p := range focus.Reconciliations {
+				problems := ""
+				if len(p.Problems) > 0 {
+					problems = " problems: " + strings.Join(p.Problems, "; ")
+				}
+				fmt.Fprintf(out, "    %s origin=%s allocated=%s unallocated=%s agents=%d%s\n",
+					p.Pool, formatUSD(p.OriginCost), formatUSD(p.Allocated), formatUSD(p.Unallocated), p.Agents, problems)
+			}
+		}
+		fmt.Fprintln(out)
 	} else {
 		fmt.Fprintln(out)
 	}
 
 	w := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(w, "ALLOCATED-RESOURCE-ID\tALLOCATED-NAME\tMETHOD\tSERVICE\tQUANTITY\tUNIT\tBILLED ($)\tTENANT\tCLASS")
-	for _, c := range focus.Charges {
-		resID := c.AllocatedResourceID
-		if resID == "" {
-			resID = "-"
+	fmt.Fprintln(w, "ALLOCATED-RESOURCE-ID\tALLOCATED-NAME\tMETHOD\tSERVICE\tQUANTITY\tUNIT\tEFFECTIVE ($)\tBILLED ($)\tTENANT\tCLASS\tESTIMATE")
+	writeRow := func(c finops.FocusCharge) {
+		est := "no"
+		if c.Estimated() || estimated {
+			est = "yes"
 		}
-		resName := c.AllocatedResourceName
-		if resName == "" {
-			resName = "-"
-		}
-		tenant := firstNonEmpty(
-			c.AllocatedTags["tenant"],
-			c.AllocatedTags["finops.agent-substrate.dev/tenant"],
-			c.AllocatedTags["ate.finops.tenant"],
-			"-",
-		)
-		class := firstNonEmpty(
-			c.AllocatedTags["finops.agent-substrate.dev/class"],
-			c.AllocatedTags["ate.template.class"],
-			c.AllocatedTags["class"],
-		)
-		if class == "" {
-			if c.AllocatedTags["is_agent"] == "true" || c.AllocatedTags["finops.agent-substrate.dev/is_agent"] == "true" {
-				class = "agent"
-			} else if c.AllocatedTags["is_agent"] == "false" || c.AllocatedTags["finops.agent-substrate.dev/is_agent"] == "false" {
-				class = "shared"
-			} else {
-				class = "-"
-			}
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.4f\t%s\t%s\t%s\t%s\n",
-			resID, resName, c.AllocatedMethodID, c.ServiceName,
-			c.ConsumedQuantity, c.ConsumedUnit, formatUSD(c.BilledCost), tenant, class)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.4f\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			firstNonEmpty(c.AllocatedResourceID, "-"), firstNonEmpty(c.AllocatedResourceName, "-"),
+			c.AllocatedMethodID, c.ServiceName, c.ConsumedQuantity, c.ConsumedUnit,
+			formatUSD(c.EffectiveCost), formatUSD(c.BilledCost), focusTenant(c), focusClass(c), est)
 	}
-	return w.Flush()
+	for _, c := range focus.Charges {
+		writeRow(c)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if len(focus.AuxiliaryCharges) > 0 {
+		fmt.Fprintln(out, "\nAuxiliary Charges (tokens, storage, platform overhead):")
+		w = tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
+		fmt.Fprintln(w, "ALLOCATED-RESOURCE-ID\tALLOCATED-NAME\tMETHOD\tSERVICE\tQUANTITY\tUNIT\tEFFECTIVE ($)\tBILLED ($)\tTENANT\tCLASS\tESTIMATE")
+		for _, c := range focus.AuxiliaryCharges {
+			writeRow(c)
+		}
+		return w.Flush()
+	}
+	return nil
 }
 
-func encodeStructured(out io.Writer, v any, format string) error {
+func focusTenant(c finops.FocusCharge) string {
+	return firstNonEmpty(
+		c.AllocatedTags["tenant"],
+		c.AllocatedTags["finops.agent-substrate.dev/tenant"],
+		c.AllocatedTags["ate.finops.tenant"],
+		"-",
+	)
+}
+
+func focusClass(c finops.FocusCharge) string {
+	class := firstNonEmpty(
+		c.AllocatedTags["finops.agent-substrate.dev/class"],
+		c.AllocatedTags["ate.template.class"],
+		c.AllocatedTags["class"],
+	)
+	if class != "" {
+		return class
+	}
+	switch firstNonEmpty(c.AllocatedTags["is_agent"], c.AllocatedTags["finops.agent-substrate.dev/is_agent"]) {
+	case "true":
+		return "agent"
+	case "false":
+		return "shared"
+	}
+	return "-"
+}
+
+// writeRaw prints a server JSON body as JSON, unchanged, or as YAML with the
+// same keys in the same order. It never goes through the client's structs,
+// so no field that the CLI does not know is lost.
+func writeRaw(out io.Writer, raw []byte, format string) error {
 	switch format {
 	case "json":
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(v)
+		raw = bytes.TrimRight(raw, "\n")
+		if _, err := out.Write(raw); err != nil {
+			return err
+		}
+		_, err := io.WriteString(out, "\n")
+		return err
 	case "yaml":
-		enc := yaml.NewEncoder(out)
-		enc.SetIndent(2)
-		defer enc.Close()
-		return enc.Encode(v)
+		y, err := jsonToYAML(raw)
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(y)
+		return err
 	default:
 		return fmt.Errorf("unsupported structured format %q", format)
 	}
 }
 
+// jsonToYAML converts a JSON document to block-style YAML, keeping key order.
+// A string that would read back as another type, such as "true" or a date,
+// stays quoted.
+func jsonToYAML(raw []byte) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("converting the server's JSON to YAML: %w", err)
+	}
+	var plain func(n *yaml.Node)
+	plain = func(n *yaml.Node) {
+		n.Style = 0
+		for _, c := range n.Content {
+			plain(c)
+		}
+	}
+	plain(&doc)
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func formatUSD(v float64) string {
+	if v < 0 {
+		return fmt.Sprintf("-$%.6f", -v)
+	}
 	return fmt.Sprintf("$%.6f", v)
 }
 
@@ -748,7 +971,8 @@ func resolveOptionalAXServerURL(explicitServer, kubeContext string) string {
 }
 
 // resolveOptionalFinOpsURL returns a FinOps HTTP server URL if one is explicitly
-// configured or reachable via an active local tunnel/port-forward.
+// configured or reachable through the tunnel saved for the kube context. It
+// never uses a local port that no saved tunnel names for the context.
 func resolveOptionalFinOpsURL(finopsServer, kubeContext string) string {
 	if finopsServer != "" {
 		return finopsServer
@@ -756,17 +980,9 @@ func resolveOptionalFinOpsURL(finopsServer, kubeContext string) string {
 	if env := os.Getenv("AX_FINOPS_SERVER"); env != "" {
 		return env
 	}
-	if env := os.Getenv("FINOPS_SERVER"); env != "" {
-		return env
-	}
 	if ctxName, err := tunnel.CurrentContext(kubeContext); err == nil && ctxName != "" {
-		if existing, err := tunnel.GetTunnel(ctxName + "-finops"); err == nil && existing != nil && tunnel.IsFinOpsTunnelHealthy(existing.Port) {
+		if existing, err := tunnel.GetTunnel(tunnel.FinOpsTunnelKey(ctxName)); err == nil && existing != nil && tunnel.IsFinOpsTunnelHealthy(existing.Port) {
 			return fmt.Sprintf("http://127.0.0.1:%d", existing.Port)
-		}
-	}
-	for _, p := range []int{18080, 9090} {
-		if tunnel.IsFinOpsTunnelHealthy(p) {
-			return fmt.Sprintf("http://127.0.0.1:%d", p)
 		}
 	}
 	return ""
@@ -774,25 +990,28 @@ func resolveOptionalFinOpsURL(finopsServer, kubeContext string) string {
 
 // tryPrintTaskDescribeCost appends FinOps cost attribution to `ax describe task`
 // when a FinOps server is reachable and has records for the task's actor.
-func tryPrintTaskDescribeCost(out io.Writer, finopsURL, atespace, taskName, actorName string) {
-	if finopsURL == "" {
+func tryPrintTaskDescribeCost(out io.Writer, finopsURL string, task *v1alpha1.Task) {
+	if finopsURL == "" || task.GetMetadata() == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	client := finops.NewClient(finopsURL, nil)
-	lookupName := actorName
-	if lookupName == "" {
-		lookupName = taskName
-	}
-	actorCost, sessions, children, _, err := client.GetActorCost(ctx, atespace, lookupName)
-	if err != nil || actorCost == nil {
+	atespace := firstNonEmpty(task.GetMetadata().GetAtespace(), "default")
+	// The actor is named after the task, in the task's atespace.
+	m, err := client.GetActorCost(ctx, atespace, true, task.GetMetadata().GetName())
+	var amb *finops.AmbiguousError
+	if errors.As(err, &amb) {
+		fmt.Fprintf(out, "\nFinOps: %v\n", err)
 		return
 	}
-	printActorCostSections(out, actorCost, sessions, children)
-}
-
-// sortStrings is a tiny helper to keep imports clean if needed.
-func sortStrings(s []string) {
-	sort.Strings(s)
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(out, "\nFinOps Cost:")
+	printTaskBudget(out, m.Actor, viewTask(m.Actor, task))
+	printActorCostSections(out, m.Actor, m.SessionCosts, m.Children)
+	fmt.Fprintln(out)
+	printCostBasis(out, m.Report.Estimated())
+	printCostWarnings(out, finops.Totals{UnknownCostCalls: m.Actor.UnknownCostCalls, UnpricedCalls: m.Actor.UnpricedCalls, UsageStatus: m.Actor.UsageStatus}, m.Actor.Compute, nil)
 }

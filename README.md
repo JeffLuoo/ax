@@ -167,10 +167,11 @@ ax version
 # Agent FinOps cost attribution (requires FinOps deployed in ate-finops)
 ax cost -a my-atespace                # per-task / per-actor cost summary
 ax cost -A -o wide                    # all atespaces with UID, measured cost, and sub-agent tree cost
-ax cost task task123                  # 3-number hosting cost, LLM spend, sub-agents, and sessions
+ax cost task task123                  # 3-number hosting cost, LLM spend, budget, outcome, sub-agents, and sessions
 ax cost curve                         # < $1.00 / agent-month hosting sensitivity curve
 ax cost focus                         # FOCUS 1.3 split cost allocation rows + _unused_capacity
 ax cost focus -o csv                  # export FOCUS 1.3 allocation rows as CSV
+ax cost -a my-atespace -o json        # the FinOps server's response, unchanged
 ```
 
 ### Works with `kubectx`

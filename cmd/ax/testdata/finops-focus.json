@@ -1,0 +1,356 @@
+{
+  "originCharge": {
+    "OriginChargeId": "charge-pool-all-ate-workers/default",
+    "BillingCurrency": "USD",
+    "BillingPeriodStart": "2026-10-18T12:49:11Z",
+    "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+    "ChargePeriodStart": "2026-10-18T12:49:11Z",
+    "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+    "ChargeCategory": "Usage",
+    "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+    "ServiceProviderName": "Google Cloud",
+    "HostProviderName": "Google Cloud",
+    "ServiceName": "Kubernetes Engine",
+    "ServiceCategory": "Compute",
+    "ResourceId": "gke-worker-pool/all/ate-workers/default",
+    "ResourceName": "ate-workers/default",
+    "ResourceType": "WorkerPool",
+    "PricingUnit": "Hours",
+    "PricingQuantity": 2.000324998888889,
+    "ConsumedUnit": "Hours",
+    "ConsumedQuantity": 2.000324998888889,
+    "ListCost": 0.1396355656,
+    "ContractedCost": 0.1396355656,
+    "EffectiveCost": 0.1396355656,
+    "BilledCost": 0,
+    "Tags": {
+      "finops.agent-substrate.dev/estimated": "true",
+      "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+      "finops.agent-substrate.dev/summary-atespace": "all",
+      "finops.agent-substrate.dev/tier": "on-demand"
+    }
+  },
+  "originCharges": [
+    {
+      "OriginChargeId": "charge-pool-all-ate-workers/default",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "2026-10-18T12:49:11Z",
+      "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargeCategory": "Usage",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ServiceProviderName": "Google Cloud",
+      "HostProviderName": "Google Cloud",
+      "ServiceName": "Kubernetes Engine",
+      "ServiceCategory": "Compute",
+      "ResourceId": "gke-worker-pool/all/ate-workers/default",
+      "ResourceName": "ate-workers/default",
+      "ResourceType": "WorkerPool",
+      "PricingUnit": "Hours",
+      "PricingQuantity": 2.000324998888889,
+      "ConsumedUnit": "Hours",
+      "ConsumedQuantity": 2.000324998888889,
+      "ListCost": 0.1396355656,
+      "ContractedCost": 0.1396355656,
+      "EffectiveCost": 0.1396355656,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true",
+        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/summary-atespace": "all",
+        "finops.agent-substrate.dev/tier": "on-demand"
+      }
+    }
+  ],
+  "charges": [
+    {
+      "OriginChargeId": "charge-pool-all-ate-workers/default",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "2026-10-18T12:49:11Z",
+      "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargeCategory": "Usage",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ServiceProviderName": "Google Cloud",
+      "HostProviderName": "Google Cloud",
+      "ServiceName": "Kubernetes Engine",
+      "ServiceCategory": "Compute",
+      "ResourceId": "gke-worker-pool/all/ate-workers/default",
+      "ResourceName": "ate-workers/default",
+      "ResourceType": "WorkerPool",
+      "PricingUnit": "Hours",
+      "PricingQuantity": 0.7658275475,
+      "ConsumedUnit": "Hours",
+      "ConsumedQuantity": 0.7658275475,
+      "ListCost": 0.0534596942,
+      "ContractedCost": 0.0534596942,
+      "EffectiveCost": 0.053459694200000005,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true",
+        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/summary-atespace": "all",
+        "finops.agent-substrate.dev/tier": "on-demand"
+      },
+      "AllocatedMethodId": "booked-share",
+      "AllocatedMethodDetails": {
+        "Elements": [
+          {
+            "AllocatedRatio": 0.3019164445594511,
+            "UsageQuantity": 1.3336583322222222,
+            "UsageUnit": "vCPU-Hours",
+            "x_Method": "booked-share",
+            "x_PricePerUnit": 0.031611
+          },
+          {
+            "AllocatedRatio": 0.08093511600313953,
+            "UsageQuantity": 2.6673166644444444,
+            "UsageUnit": "GiB-Hours",
+            "x_Method": "booked-share",
+            "x_PricePerUnit": 0.004237
+          }
+        ]
+      },
+      "AllocatedResourceId": "uid-child-0000001",
+      "AllocatedResourceName": "team-a/child",
+      "AllocatedTags": {
+        "finops.agent-substrate.dev/atespace": "team-a",
+        "finops.agent-substrate.dev/class": "agent",
+        "finops.agent-substrate.dev/is_agent": "true",
+        "finops.agent-substrate.dev/parent_agent_id": "team-a/root",
+        "finops.agent-substrate.dev/template": "team-a/support-agent",
+        "finops.agent-substrate.dev/tenant": "team-a",
+        "is_agent": "true",
+        "template": "team-a/support-agent",
+        "tenant": "team-a"
+      }
+    },
+    {
+      "OriginChargeId": "charge-pool-all-ate-workers/default",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "2026-10-18T12:49:11Z",
+      "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargeCategory": "Usage",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ServiceProviderName": "Google Cloud",
+      "HostProviderName": "Google Cloud",
+      "ServiceName": "Kubernetes Engine",
+      "ServiceCategory": "Compute",
+      "ResourceId": "gke-worker-pool/all/ate-workers/default",
+      "ResourceName": "ate-workers/default",
+      "ResourceType": "WorkerPool",
+      "PricingUnit": "Hours",
+      "PricingQuantity": 0.5743902011,
+      "ConsumedUnit": "Hours",
+      "ConsumedQuantity": 0.5743902011,
+      "ListCost": 0.0400961347,
+      "ContractedCost": 0.0400961347,
+      "EffectiveCost": 0.040096134699999994,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true",
+        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/summary-atespace": "all",
+        "finops.agent-substrate.dev/tier": "on-demand"
+      },
+      "AllocatedMethodId": "booked-share",
+      "AllocatedMethodDetails": {
+        "Elements": [
+          {
+            "AllocatedRatio": 0.226445036865307,
+            "UsageQuantity": 1.0002777777777778,
+            "UsageUnit": "vCPU-Hours",
+            "x_Method": "booked-share",
+            "x_PricePerUnit": 0.031611
+          },
+          {
+            "AllocatedRatio": 0.06070340219970434,
+            "UsageQuantity": 2.0005555555555556,
+            "UsageUnit": "GiB-Hours",
+            "x_Method": "booked-share",
+            "x_PricePerUnit": 0.004237
+          }
+        ]
+      },
+      "AllocatedResourceId": "uid-root-00000001",
+      "AllocatedResourceName": "team-a/root",
+      "AllocatedTags": {
+        "finops.agent-substrate.dev/atespace": "team-a",
+        "finops.agent-substrate.dev/class": "agent",
+        "finops.agent-substrate.dev/is_agent": "true",
+        "finops.agent-substrate.dev/template": "team-a/support-agent",
+        "finops.agent-substrate.dev/tenant": "team-a",
+        "is_agent": "true",
+        "template": "team-a/support-agent",
+        "tenant": "team-a"
+      }
+    },
+    {
+      "OriginChargeId": "charge-pool-all-ate-workers/default",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "2026-10-18T12:49:11Z",
+      "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargeCategory": "Usage",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ServiceProviderName": "Google Cloud",
+      "HostProviderName": "Google Cloud",
+      "ServiceName": "Kubernetes Engine",
+      "ServiceCategory": "Compute",
+      "ResourceId": "gke-worker-pool/all/ate-workers/default",
+      "ResourceName": "ate-workers/default",
+      "ResourceType": "WorkerPool",
+      "PricingUnit": "Hours",
+      "PricingQuantity": 0.6601072502888888,
+      "ConsumedUnit": "Hours",
+      "ConsumedQuantity": 0.6601072502888888,
+      "ListCost": 0.04607973670000002,
+      "ContractedCost": 0.04607973670000002,
+      "EffectiveCost": 0.04607973670000001,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true",
+        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/summary-atespace": "all",
+        "finops.agent-substrate.dev/tier": "on-demand"
+      },
+      "AllocatedMethodId": "booked-share",
+      "AllocatedMethodDetails": {
+        "Elements": [
+          {
+            "AllocatedRatio": 0.330000000372398,
+            "x_UnusedCapacityResourceId": "_unused_capacity"
+          }
+        ]
+      },
+      "AllocatedResourceId": "_unused_capacity",
+      "AllocatedResourceName": "(unused pool capacity)"
+    }
+  ],
+  "auxiliaryCharges": [
+    {
+      "OriginChargeId": "charge-storage-uid-child-0000001",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "0001-01-01T00:00:00Z",
+      "BillingPeriodEnd": "0001-01-01T00:00:00Z",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargeCategory": "Usage",
+      "ServiceName": "Cloud Storage",
+      "ServiceCategory": "Storage",
+      "ResourceId": "charge-storage-uid-child-0000001",
+      "ResourceName": "charge-storage-uid-child-0000001",
+      "PricingUnit": "GiB-Months",
+      "PricingQuantity": 3,
+      "ConsumedUnit": "GiB-Months",
+      "ConsumedQuantity": 3,
+      "ListCost": 0.0001096158,
+      "ContractedCost": 0.0001096158,
+      "EffectiveCost": 0.0001096158,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true"
+      },
+      "AllocatedMethodId": "storage-usage",
+      "AllocatedMethodDetails": {
+        "Elements": [
+          {
+            "AllocatedRatio": 0.5714202366836983,
+            "UsageQuantity": 3,
+            "UsageUnit": "GiB-Months"
+          }
+        ]
+      },
+      "AllocatedResourceId": "uid-child-0000001",
+      "AllocatedResourceName": "team-a/child",
+      "AllocatedTags": {
+        "finops.agent-substrate.dev/atespace": "team-a",
+        "finops.agent-substrate.dev/class": "agent",
+        "finops.agent-substrate.dev/is_agent": "true",
+        "finops.agent-substrate.dev/parent_agent_id": "team-a/root",
+        "finops.agent-substrate.dev/tenant": "team-a",
+        "is_agent": "true",
+        "tenant": "team-a"
+      }
+    },
+    {
+      "OriginChargeId": "charge-storage-uid-root-00000001",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "0001-01-01T00:00:00Z",
+      "BillingPeriodEnd": "0001-01-01T00:00:00Z",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargeCategory": "Usage",
+      "ServiceName": "Cloud Storage",
+      "ServiceCategory": "Storage",
+      "ResourceId": "charge-storage-uid-root-00000001",
+      "ResourceName": "charge-storage-uid-root-00000001",
+      "PricingUnit": "GiB-Months",
+      "PricingQuantity": 3,
+      "ConsumedUnit": "GiB-Months",
+      "ConsumedQuantity": 3,
+      "ListCost": 0.0000822146,
+      "ContractedCost": 0.0000822146,
+      "EffectiveCost": 0.0000822146,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true"
+      },
+      "AllocatedMethodId": "storage-usage",
+      "AllocatedMethodDetails": {
+        "Elements": [
+          {
+            "AllocatedRatio": 0.4285797633163017,
+            "UsageQuantity": 3,
+            "UsageUnit": "GiB-Months"
+          }
+        ]
+      },
+      "AllocatedResourceId": "uid-root-00000001",
+      "AllocatedResourceName": "team-a/root",
+      "AllocatedTags": {
+        "finops.agent-substrate.dev/atespace": "team-a",
+        "finops.agent-substrate.dev/class": "agent",
+        "finops.agent-substrate.dev/is_agent": "true",
+        "finops.agent-substrate.dev/tenant": "team-a",
+        "is_agent": "true",
+        "tenant": "team-a"
+      }
+    }
+  ],
+  "reconciliation": {
+    "resourceId": "gke-worker-pools/all",
+    "pool": "all",
+    "periodStart": "2026-10-18T12:49:11Z",
+    "periodEnd": "2026-10-18T10:49:12.169996-04:00",
+    "estimated": true,
+    "originCost": 0.1396355656,
+    "allocated": 0.0935558289,
+    "unallocated": 0.0460797367,
+    "agents": 2,
+    "unsizedLeases": 0,
+    "estimatedLeases": 0,
+    "problems": []
+  },
+  "reconciliations": [
+    {
+      "resourceId": "gke-worker-pool/all/ate-workers/default",
+      "pool": "ate-workers/default",
+      "periodStart": "2026-10-18T12:49:11Z",
+      "periodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "estimated": true,
+      "originCost": 0.1396355656,
+      "allocated": 0.0935558289,
+      "unallocated": 0.0460797367,
+      "agents": 2,
+      "unsizedLeases": 0,
+      "estimatedLeases": 0,
+      "problems": []
+    }
+  ]
+}

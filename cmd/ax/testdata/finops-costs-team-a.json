@@ -1,0 +1,877 @@
+{
+  "costBasis": "estimated",
+  "since": "2026-10-18T10:49:07.639445-04:00",
+  "generatedAt": "2026-10-18T10:49:12.129898-04:00",
+  "atespace": "team-a",
+  "totals": {
+    "calls": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "cacheWriteInputTokens": 0,
+    "reasoningOutputTokens": 0,
+    "cost": {},
+    "unpricedCalls": 0,
+    "usageStatus": {},
+    "lastCall": "0001-01-01T00:00:00Z"
+  },
+  "compute": {
+    "leases": 2,
+    "openLeases": 1,
+    "leaseSeconds": 8402.129898,
+    "vcpuSeconds": 8402.129898,
+    "gibSeconds": 16804.259796,
+    "cost": {
+      "USD": 0.093555382489
+    },
+    "measuredCost": {
+      "USD": 0.056582370103
+    },
+    "measuredFallbackLeases": 1,
+    "unpricedLeases": 0,
+    "measuredCpuSeconds": 120,
+    "lastLease": "2026-10-18T14:49:12.129898Z"
+  },
+  "totalCost": {
+    "USD": 0.093555382489
+  },
+  "fullyLoadedCost": {
+    "USD": 0.139826728687
+  },
+  "actors": [
+    {
+      "atespace": "team-a",
+      "name": "child",
+      "uid": "uid-child-0000001",
+      "tenant": "team-a",
+      "parentAgentId": "team-a/root",
+      "template": "team-a/support-agent",
+      "class": "agent",
+      "isAgent": true,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "reasoningOutputTokens": 0,
+      "cost": {},
+      "unpricedCalls": 0,
+      "usageStatus": {},
+      "lastCall": "0001-01-01T00:00:00Z",
+      "compute": {
+        "leases": 1,
+        "openLeases": 1,
+        "leaseSeconds": 4801.129898,
+        "vcpuSeconds": 4801.129898,
+        "gibSeconds": 9602.259796,
+        "cost": {
+          "USD": 0.053459247767
+        },
+        "measuredCost": {
+          "USD": 0.053459247767
+        },
+        "measuredFallbackLeases": 1,
+        "unpricedLeases": 0,
+        "measuredCpuSeconds": 0,
+        "lastLease": "2026-10-18T14:49:12.129898Z"
+      },
+      "totalCost": {
+        "USD": 0.053459247767
+      },
+      "measuredComputeCost": {
+        "USD": 0.053459247767
+      },
+      "idleShareCost": {
+        "USD": 0.026330674273
+      },
+      "storageCost": {
+        "USD": 0.000109614838
+      },
+      "hostingCost": {
+        "USD": 0.079899536878
+      },
+      "measuredHostingCost": {
+        "USD": 0.079899536878
+      },
+      "fullyLoadedCost": {
+        "USD": 0.079899536878
+      },
+      "measuredFullyLoadedCost": {
+        "USD": 0.079899536878
+      },
+      "treeComputeCost": {
+        "USD": 0.053459247767
+      },
+      "treeTotalCost": {
+        "USD": 0.053459247767
+      },
+      "treeFullyLoadedCost": {
+        "USD": 0.079899536878
+      },
+      "task": {
+        "name": "child",
+        "parent": "root",
+        "budgetUsd": 0.01,
+        "spendUsd": 0.053459247767,
+        "treeSpendUsd": 0.053459247767,
+        "overBudget": true,
+        "treeOverBudget": true,
+        "outcome": "Failed",
+        "exitCode": 3
+      },
+      "models": []
+    },
+    {
+      "atespace": "team-a",
+      "name": "root",
+      "uid": "uid-root-00000001",
+      "tenant": "team-a",
+      "subAgents": 1,
+      "template": "team-a/support-agent",
+      "class": "agent",
+      "isAgent": true,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "reasoningOutputTokens": 0,
+      "cost": {},
+      "unpricedCalls": 0,
+      "usageStatus": {},
+      "lastCall": "0001-01-01T00:00:00Z",
+      "compute": {
+        "leases": 1,
+        "openLeases": 0,
+        "leaseSeconds": 3601,
+        "vcpuSeconds": 3601,
+        "gibSeconds": 7202,
+        "cost": {
+          "USD": 0.040096134722
+        },
+        "measuredCost": {
+          "USD": 0.003123122336
+        },
+        "measuredFallbackLeases": 0,
+        "unpricedLeases": 0,
+        "measuredCpuSeconds": 120,
+        "lastLease": "2026-10-18T13:49:12Z"
+      },
+      "totalCost": {
+        "USD": 0.040096134722
+      },
+      "measuredComputeCost": {
+        "USD": 0.003123122336
+      },
+      "idleShareCost": {
+        "USD": 0.019748842475
+      },
+      "storageCost": {
+        "USD": 0.000082214612
+      },
+      "hostingCost": {
+        "USD": 0.059927191809
+      },
+      "measuredHostingCost": {
+        "USD": 0.022954179423
+      },
+      "fullyLoadedCost": {
+        "USD": 0.059927191809
+      },
+      "measuredFullyLoadedCost": {
+        "USD": 0.022954179423
+      },
+      "treeComputeCost": {
+        "USD": 0.093555382489
+      },
+      "treeTotalCost": {
+        "USD": 0.093555382489
+      },
+      "treeFullyLoadedCost": {
+        "USD": 0.139826728687
+      },
+      "task": {
+        "name": "root",
+        "budgetUsd": 5,
+        "spendUsd": 0.040096134722,
+        "treeSpendUsd": 0.093555382489,
+        "overBudget": false,
+        "treeOverBudget": false,
+        "outcome": "Completed",
+        "exitCode": 0
+      },
+      "models": []
+    }
+  ],
+  "templates": [
+    {
+      "template": "team-a/support-agent",
+      "class": "agent",
+      "actors": 2,
+      "llmCost": {},
+      "compute": {
+        "leases": 2,
+        "openLeases": 1,
+        "leaseSeconds": 8402.129898,
+        "vcpuSeconds": 8402.129898,
+        "gibSeconds": 16804.259796,
+        "cost": {
+          "USD": 0.093555382489
+        },
+        "measuredCost": {
+          "USD": 0.056582370103
+        },
+        "measuredFallbackLeases": 1,
+        "unpricedLeases": 0,
+        "measuredCpuSeconds": 120,
+        "lastLease": "2026-10-18T14:49:12.129898Z"
+      },
+      "totalCost": {
+        "USD": 0.093555382489
+      }
+    }
+  ],
+  "sessions": [
+    {
+      "sessionId": "uid-child-0000001#epoch:uid-child-0000001/1792330151000000000",
+      "fromHeader": false,
+      "atespace": "team-a",
+      "actor": "team-a/child",
+      "actorUid": "uid-child-0000001",
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "activeSeconds": 4801.129898,
+      "activeShare": 1,
+      "llmCost": {},
+      "computeCost": {
+        "USD": 0.053459247767
+      },
+      "totalCost": {
+        "USD": 0.053459247767
+      },
+      "lastActivity": "2026-10-18T14:49:12.129898Z"
+    },
+    {
+      "sessionId": "uid-root-00000001#epoch:1792327751000000000",
+      "fromHeader": false,
+      "atespace": "team-a",
+      "actor": "team-a/root",
+      "actorUid": "uid-root-00000001",
+      "epoch": "1792327751000000000",
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "activeSeconds": 3601,
+      "activeShare": 1,
+      "llmCost": {},
+      "computeCost": {
+        "USD": 0.040096134722
+      },
+      "totalCost": {
+        "USD": 0.040096134722
+      },
+      "lastActivity": "2026-10-18T13:49:12Z"
+    }
+  ],
+  "curve": [
+    {
+      "tier": "on-demand",
+      "perActiveHour": 0.040085,
+      "loadedPerActiveHour": 0.059828358208955226,
+      "fixed": 0.16,
+      "breakEvenHours": 14.040164650118497,
+      "alwaysOn": 43.83470149253731,
+      "points": [
+        {
+          "activeHours": 0,
+          "variable": 0,
+          "idleShare": 0,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.16,
+          "underTarget": true
+        },
+        {
+          "activeHours": 1,
+          "variable": 0.040085,
+          "idleShare": 0.019743358208955217,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.21982835820895522,
+          "underTarget": true
+        },
+        {
+          "activeHours": 2,
+          "variable": 0.08017,
+          "idleShare": 0.039486716417910434,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.27965671641791046,
+          "underTarget": true
+        },
+        {
+          "activeHours": 5,
+          "variable": 0.20042500000000002,
+          "idleShare": 0.0987167910447761,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.45914179104477615,
+          "underTarget": true
+        },
+        {
+          "activeHours": 10,
+          "variable": 0.40085000000000004,
+          "idleShare": 0.1974335820895522,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.7582835820895523,
+          "underTarget": true
+        },
+        {
+          "activeHours": 15,
+          "variable": 0.601275,
+          "idleShare": 0.2961503731343282,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 1.0574253731343284,
+          "underTarget": false
+        },
+        {
+          "activeHours": 20,
+          "variable": 0.8017000000000001,
+          "idleShare": 0.3948671641791044,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 1.3565671641791046,
+          "underTarget": false
+        },
+        {
+          "activeHours": 30,
+          "variable": 1.20255,
+          "idleShare": 0.5923007462686564,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 1.9548507462686566,
+          "underTarget": false
+        },
+        {
+          "activeHours": 50,
+          "variable": 2.0042500000000003,
+          "idleShare": 0.9871679104477613,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 3.1514179104477615,
+          "underTarget": false
+        },
+        {
+          "activeHours": 100,
+          "variable": 4.008500000000001,
+          "idleShare": 1.9743358208955226,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 6.142835820895522,
+          "underTarget": false
+        },
+        {
+          "activeHours": 200,
+          "variable": 8.017000000000001,
+          "idleShare": 3.9486716417910452,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 12.125671641791046,
+          "underTarget": false
+        },
+        {
+          "activeHours": 365,
+          "variable": 14.631025000000001,
+          "idleShare": 7.206325746268654,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 21.997350746268655,
+          "underTarget": false
+        },
+        {
+          "activeHours": 730,
+          "variable": 29.262050000000002,
+          "idleShare": 14.412651492537307,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 43.83470149253731,
+          "underTarget": false
+        }
+      ]
+    },
+    {
+      "tier": "cud-1y",
+      "perActiveHour": 0.025252999999999998,
+      "loadedPerActiveHour": 0.0376910447761194,
+      "fixed": 0.16,
+      "breakEvenHours": 22.28646101453293,
+      "alwaysOn": 27.67446268656716,
+      "points": [
+        {
+          "activeHours": 0,
+          "variable": 0,
+          "idleShare": 0,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.16,
+          "underTarget": true
+        },
+        {
+          "activeHours": 1,
+          "variable": 0.025252999999999998,
+          "idleShare": 0.0124380447761194,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.1976910447761194,
+          "underTarget": true
+        },
+        {
+          "activeHours": 2,
+          "variable": 0.050505999999999995,
+          "idleShare": 0.0248760895522388,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.2353820895522388,
+          "underTarget": true
+        },
+        {
+          "activeHours": 5,
+          "variable": 0.126265,
+          "idleShare": 0.062190223880597,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.348455223880597,
+          "underTarget": true
+        },
+        {
+          "activeHours": 10,
+          "variable": 0.25253,
+          "idleShare": 0.124380447761194,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.536910447761194,
+          "underTarget": true
+        },
+        {
+          "activeHours": 15,
+          "variable": 0.378795,
+          "idleShare": 0.186570671641791,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.725365671641791,
+          "underTarget": true
+        },
+        {
+          "activeHours": 20,
+          "variable": 0.50506,
+          "idleShare": 0.248760895522388,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.913820895522388,
+          "underTarget": true
+        },
+        {
+          "activeHours": 30,
+          "variable": 0.75759,
+          "idleShare": 0.373141343283582,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 1.290731343283582,
+          "underTarget": false
+        },
+        {
+          "activeHours": 50,
+          "variable": 1.2626499999999998,
+          "idleShare": 0.6219022388059698,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 2.0445522388059696,
+          "underTarget": false
+        },
+        {
+          "activeHours": 100,
+          "variable": 2.5252999999999997,
+          "idleShare": 1.2438044776119397,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 3.9291044776119395,
+          "underTarget": false
+        },
+        {
+          "activeHours": 200,
+          "variable": 5.050599999999999,
+          "idleShare": 2.4876089552238794,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 7.698208955223878,
+          "underTarget": false
+        },
+        {
+          "activeHours": 365,
+          "variable": 9.217345,
+          "idleShare": 4.539886343283581,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 13.91723134328358,
+          "underTarget": false
+        },
+        {
+          "activeHours": 730,
+          "variable": 18.43469,
+          "idleShare": 9.079772686567162,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 27.67446268656716,
+          "underTarget": false
+        }
+      ]
+    },
+    {
+      "tier": "spot",
+      "perActiveHour": 0.012025000000000001,
+      "loadedPerActiveHour": 0.01794776119402985,
+      "fixed": 0.16,
+      "breakEvenHours": 46.8024948024948,
+      "alwaysOn": 13.261865671641791,
+      "points": [
+        {
+          "activeHours": 0,
+          "variable": 0,
+          "idleShare": 0,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.16,
+          "underTarget": true
+        },
+        {
+          "activeHours": 1,
+          "variable": 0.012025000000000001,
+          "idleShare": 0.00592276119402985,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.17794776119402986,
+          "underTarget": true
+        },
+        {
+          "activeHours": 2,
+          "variable": 0.024050000000000002,
+          "idleShare": 0.0118455223880597,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.1958955223880597,
+          "underTarget": true
+        },
+        {
+          "activeHours": 5,
+          "variable": 0.060125000000000005,
+          "idleShare": 0.029613805970149253,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.24973880597014927,
+          "underTarget": true
+        },
+        {
+          "activeHours": 10,
+          "variable": 0.12025000000000001,
+          "idleShare": 0.059227611940298505,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.3394776119402985,
+          "underTarget": true
+        },
+        {
+          "activeHours": 15,
+          "variable": 0.180375,
+          "idleShare": 0.08884141791044775,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.42921641791044773,
+          "underTarget": true
+        },
+        {
+          "activeHours": 20,
+          "variable": 0.24050000000000002,
+          "idleShare": 0.11845522388059701,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.518955223880597,
+          "underTarget": true
+        },
+        {
+          "activeHours": 30,
+          "variable": 0.36075,
+          "idleShare": 0.1776828358208955,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 0.6984328358208954,
+          "underTarget": true
+        },
+        {
+          "activeHours": 50,
+          "variable": 0.6012500000000001,
+          "idleShare": 0.29613805970149254,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 1.0573880597014926,
+          "underTarget": false
+        },
+        {
+          "activeHours": 100,
+          "variable": 1.2025000000000001,
+          "idleShare": 0.5922761194029851,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 1.9547761194029853,
+          "underTarget": false
+        },
+        {
+          "activeHours": 200,
+          "variable": 2.4050000000000002,
+          "idleShare": 1.1845522388059702,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 3.7495522388059705,
+          "underTarget": false
+        },
+        {
+          "activeHours": 365,
+          "variable": 4.389125,
+          "idleShare": 2.1618078358208943,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 6.710932835820894,
+          "underTarget": false
+        },
+        {
+          "activeHours": 730,
+          "variable": 8.77825,
+          "idleShare": 4.323615671641789,
+          "storage": 0.06,
+          "platform": 0.1,
+          "fullyLoaded": 13.26186567164179,
+          "underTarget": false
+        }
+      ]
+    }
+  ],
+  "focus": [
+    {
+      "OriginChargeId": "charge-pool-team-a-ate-workers/default",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "2026-10-18T12:49:11Z",
+      "BillingPeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "ChargeCategory": "Usage",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ServiceProviderName": "Google Cloud",
+      "HostProviderName": "Google Cloud",
+      "ServiceName": "Kubernetes Engine",
+      "ServiceCategory": "Compute",
+      "ResourceId": "gke-worker-pool/team-a/ate-workers/default",
+      "ResourceName": "ate-workers/default",
+      "ResourceType": "WorkerPool",
+      "PricingUnit": "Hours",
+      "PricingQuantity": 0.7658205417,
+      "ConsumedUnit": "Hours",
+      "ConsumedQuantity": 0.7658205417,
+      "ListCost": 0.0534592477,
+      "ContractedCost": 0.0534592477,
+      "EffectiveCost": 0.0534592477,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true",
+        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/summary-atespace": "team-a",
+        "finops.agent-substrate.dev/tier": "on-demand"
+      },
+      "AllocatedMethodId": "booked-share",
+      "AllocatedMethodDetails": {
+        "Elements": [
+          {
+            "AllocatedRatio": 0.3019153638634202,
+            "UsageQuantity": 1.333647193888889,
+            "UsageUnit": "vCPU-Hours",
+            "x_Method": "booked-share",
+            "x_PricePerUnit": 0.031611
+          },
+          {
+            "AllocatedRatio": 0.08093482621284408,
+            "UsageQuantity": 2.667294387777778,
+            "UsageUnit": "GiB-Hours",
+            "x_Method": "booked-share",
+            "x_PricePerUnit": 0.004237
+          }
+        ]
+      },
+      "AllocatedResourceId": "uid-child-0000001",
+      "AllocatedResourceName": "team-a/child",
+      "AllocatedTags": {
+        "finops.agent-substrate.dev/atespace": "team-a",
+        "finops.agent-substrate.dev/class": "agent",
+        "finops.agent-substrate.dev/is_agent": "true",
+        "finops.agent-substrate.dev/parent_agent_id": "team-a/root",
+        "finops.agent-substrate.dev/template": "team-a/support-agent",
+        "finops.agent-substrate.dev/tenant": "team-a",
+        "is_agent": "true",
+        "template": "team-a/support-agent",
+        "tenant": "team-a"
+      }
+    },
+    {
+      "OriginChargeId": "charge-pool-team-a-ate-workers/default",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "2026-10-18T12:49:11Z",
+      "BillingPeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "ChargeCategory": "Usage",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ServiceProviderName": "Google Cloud",
+      "HostProviderName": "Google Cloud",
+      "ServiceName": "Kubernetes Engine",
+      "ServiceCategory": "Compute",
+      "ResourceId": "gke-worker-pool/team-a/ate-workers/default",
+      "ResourceName": "ate-workers/default",
+      "ResourceType": "WorkerPool",
+      "PricingUnit": "Hours",
+      "PricingQuantity": 0.5743897439,
+      "ConsumedUnit": "Hours",
+      "ConsumedQuantity": 0.5743897439,
+      "ListCost": 0.0400961347,
+      "ContractedCost": 0.0400961347,
+      "EffectiveCost": 0.040096134699999994,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true",
+        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/summary-atespace": "team-a",
+        "finops.agent-substrate.dev/tier": "on-demand"
+      },
+      "AllocatedMethodId": "booked-share",
+      "AllocatedMethodDetails": {
+        "Elements": [
+          {
+            "AllocatedRatio": 0.22644611756199126,
+            "UsageQuantity": 1.0002777777777778,
+            "UsageUnit": "vCPU-Hours",
+            "x_Method": "booked-share",
+            "x_PricePerUnit": 0.031611
+          },
+          {
+            "AllocatedRatio": 0.06070369190340634,
+            "UsageQuantity": 2.0005555555555556,
+            "UsageUnit": "GiB-Hours",
+            "x_Method": "booked-share",
+            "x_PricePerUnit": 0.004237
+          }
+        ]
+      },
+      "AllocatedResourceId": "uid-root-00000001",
+      "AllocatedResourceName": "team-a/root",
+      "AllocatedTags": {
+        "finops.agent-substrate.dev/atespace": "team-a",
+        "finops.agent-substrate.dev/class": "agent",
+        "finops.agent-substrate.dev/is_agent": "true",
+        "finops.agent-substrate.dev/template": "team-a/support-agent",
+        "finops.agent-substrate.dev/tenant": "team-a",
+        "is_agent": "true",
+        "template": "team-a/support-agent",
+        "tenant": "team-a"
+      }
+    },
+    {
+      "OriginChargeId": "charge-pool-team-a-ate-workers/default",
+      "BillingCurrency": "USD",
+      "BillingPeriodStart": "2026-10-18T12:49:11Z",
+      "BillingPeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "ChargePeriodStart": "2026-10-18T12:49:11Z",
+      "ChargePeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "ChargeCategory": "Usage",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ServiceProviderName": "Google Cloud",
+      "HostProviderName": "Google Cloud",
+      "ServiceName": "Kubernetes Engine",
+      "ServiceCategory": "Compute",
+      "ResourceId": "gke-worker-pool/team-a/ate-workers/default",
+      "ResourceName": "ate-workers/default",
+      "ResourceType": "WorkerPool",
+      "PricingUnit": "Hours",
+      "PricingQuantity": 0.6601035749555554,
+      "ConsumedUnit": "Hours",
+      "ConsumedQuantity": 0.6601035749555554,
+      "ListCost": 0.046079516800000005,
+      "ContractedCost": 0.046079516800000005,
+      "EffectiveCost": 0.04607951680000001,
+      "BilledCost": 0,
+      "Tags": {
+        "finops.agent-substrate.dev/estimated": "true",
+        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/summary-atespace": "team-a",
+        "finops.agent-substrate.dev/tier": "on-demand"
+      },
+      "AllocatedMethodId": "booked-share",
+      "AllocatedMethodDetails": {
+        "Elements": [
+          {
+            "AllocatedRatio": 0.3300000004583382,
+            "x_UnusedCapacityResourceId": "_unused_capacity"
+          }
+        ]
+      },
+      "AllocatedResourceId": "_unused_capacity",
+      "AllocatedResourceName": "(unused pool capacity)"
+    }
+  ],
+  "focusReconciliation": {
+    "resourceId": "gke-worker-pools/team-a",
+    "pool": "all",
+    "periodStart": "2026-10-18T12:49:11Z",
+    "periodEnd": "2026-10-18T10:49:12.129898-04:00",
+    "estimated": true,
+    "originCost": 0.1396348992,
+    "allocated": 0.0935553824,
+    "unallocated": 0.0460795168,
+    "agents": 2,
+    "unsizedLeases": 0,
+    "estimatedLeases": 0,
+    "problems": []
+  },
+  "outcomeCosts": {
+    "completed": {
+      "tasks": 1,
+      "actors": 1,
+      "totalCost": {
+        "USD": 0.040096134722
+      },
+      "fullyLoadedCost": {
+        "USD": 0.059927191809
+      }
+    },
+    "failed": {
+      "tasks": 1,
+      "actors": 1,
+      "totalCost": {
+        "USD": 0.053459247767
+      },
+      "fullyLoadedCost": {
+        "USD": 0.079899536878
+      }
+    },
+    "unfinished": {
+      "tasks": 0,
+      "actors": 0,
+      "totalCost": {},
+      "fullyLoadedCost": {}
+    },
+    "noTask": {
+      "tasks": 0,
+      "actors": 0,
+      "totalCost": {},
+      "fullyLoadedCost": {}
+    }
+  }
+}

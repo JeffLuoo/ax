@@ -51,6 +51,7 @@ func main() {
 		cmd             = opts.cmd
 		cleanArgs       = opts.args
 		atespace        = opts.atespace
+		atespaceSet     = opts.atespaceSet
 		explicitServer  = opts.server
 		kubeContext     = opts.kubeContext
 		axNamespace     = opts.namespace
@@ -103,7 +104,7 @@ func main() {
 			os.Exit(1)
 		}
 		axURL := resolveOptionalAXServerURL(explicitServer, kubeContext)
-		if err := runCost(finopsURL, axURL, atespace, atespace != "default", cleanArgs); err != nil {
+		if err := runCost(finopsURL, axURL, atespace, atespaceSet, cleanArgs); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -138,7 +139,7 @@ func main() {
 	case "get":
 		err = runGet(serverURL, atespace, cleanArgs)
 	case "describe":
-		err = runDescribe(serverURL, atespace, cleanArgs)
+		err = runDescribe(serverURL, atespace, finopsServer, kubeContext, cleanArgs)
 	case "watch":
 		err = runWatch(serverURL, atespace, cleanArgs)
 	case "suspend":
@@ -164,9 +165,11 @@ func main() {
 // globalArgs holds the command name, the flags shared by every command, and the
 // remaining arguments for the command itself.
 type globalArgs struct {
-	cmd             string
-	args            []string
-	atespace        string
+	cmd      string
+	args     []string
+	atespace string
+	// atespaceSet is true when -a or --atespace was given, even as "default".
+	atespaceSet     bool
 	server          string
 	kubeContext     string
 	namespace       string
@@ -187,10 +190,12 @@ func parseGlobalArgs(args []string) globalArgs {
 		} else if arg == "-a" || arg == "--atespace" {
 			if i+1 < len(args) {
 				g.atespace = args[i+1]
+				g.atespaceSet = true
 				i++
 			}
 		} else if strings.HasPrefix(arg, "--atespace=") {
 			g.atespace = strings.TrimPrefix(arg, "--atespace=")
+			g.atespaceSet = true
 		} else if arg == "--server" {
 			if i+1 < len(args) {
 				g.server = args[i+1]
@@ -253,9 +258,9 @@ Available Commands:
   describe workspace <name> Show detailed information about a workspace
   describe model <name>   Show detailed information about a model
   cost [tasks|actors]     Show Agent FinOps cost summary across tasks and actors
-  cost task <name>        Show 3-number hosting cost, LLM spend, sub-agent tree, and session breakdown
+  cost task <name>        Show 3-number hosting cost, LLM spend, budget, outcome, sub-agent tree, and sessions
   cost curve              Show < $1.00 / agent-month hosting cost sensitivity curve (On-Demand, CUD, Spot)
-  cost focus              Show FOCUS 1.3 split cost allocation rows and reconciliation check
+  cost focus              Show FOCUS 1.3 split cost allocation rows and the reconciliation status (estimates are labeled)
   watch task <name>       Stream live status and condition updates for a task
   ssh <task-name> [-- cmd] Run a command or shell inside the running task container
                           (Ctrl-C is forwarded; press it twice quickly, or Ctrl-\, to exit locally)
@@ -574,7 +579,7 @@ func runGet(serverURL, atespace string, args []string) error {
 	return fmt.Errorf("unknown resource %q", resource)
 }
 
-func runDescribe(serverURL, atespace string, args []string) error {
+func runDescribe(serverURL, atespace, finopsServer, kubeContext string, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: ax describe <task|workspace|model> <name>")
 	}
@@ -716,6 +721,19 @@ func runDescribe(serverURL, atespace string, args []string) error {
 	fmt.Printf("Phase:        %s\n", phase)
 	fmt.Printf("Actor:        %s\n", actor)
 	fmt.Printf("Worker IP:    %s\n", workerIP)
+	if parent := task.GetSpec().GetParent(); parent != "" {
+		fmt.Printf("Parent:       %s\n", parent)
+	}
+	if budget := task.GetSpec().GetBudget().GetMaxUsd(); budget > 0 {
+		fmt.Printf("Budget:       $%.2f\n", budget)
+	}
+	if outcome := task.GetStatus().GetOutcome(); outcome != "" {
+		finished := ""
+		if f := task.GetStatus().GetFinishedAt(); f != nil {
+			finished = ", finished " + f.AsTime().UTC().Format(time.RFC3339)
+		}
+		fmt.Printf("Outcome:      %s (exit code %d%s)\n", outcome, task.GetStatus().GetExitCode(), finished)
+	}
 	if task.Spec != nil {
 		if refs := task.Spec.WorkspaceRefs(); len(refs) > 0 {
 			paths := task.Spec.WorkspacePaths()
@@ -746,7 +764,7 @@ func runDescribe(serverURL, atespace string, args []string) error {
 		_ = w.Flush()
 	}
 
-	tryPrintTaskDescribeCost(os.Stdout, resolveOptionalFinOpsURL("", ""), taskAtespace, taskName, actor)
+	tryPrintTaskDescribeCost(os.Stdout, resolveOptionalFinOpsURL(finopsServer, kubeContext), task)
 
 	return nil
 }
@@ -1043,23 +1061,17 @@ func runTunnel(args []string) error {
 		return w.Flush()
 
 	case "stop":
+		ctxName := ""
 		if len(args) > 1 {
-			ctxName := args[1]
-			if err := tunnel.StopTunnelByContext(ctxName); err != nil {
-				return fmt.Errorf("stopping tunnel for context %q: %w", ctxName, err)
+			ctxName = args[1]
+		} else {
+			cur, err := tunnel.CurrentContext("")
+			if err != nil || cur == "" {
+				return fmt.Errorf("no current context found to stop tunnel")
 			}
-			fmt.Printf("Tunnel stopped for context %q\n", ctxName)
-			return nil
+			ctxName = cur
 		}
-		cur, err := tunnel.CurrentContext("")
-		if err != nil || cur == "" {
-			return fmt.Errorf("no current context found to stop tunnel")
-		}
-		if err := tunnel.StopTunnelByContext(cur); err != nil {
-			return fmt.Errorf("stopping tunnel for context %q: %w", cur, err)
-		}
-		fmt.Printf("Tunnel stopped for context %q\n", cur)
-		return nil
+		return stopContextTunnels(os.Stdout, ctxName)
 
 	default:
 		return fmt.Errorf("unknown tunnel subcommand: %s (available: list, stop)", args[0])
@@ -1258,4 +1270,24 @@ func escalateInterrupts(in <-chan os.Signal, window time.Duration, exit func()) 
 func stdinIsTerminal() bool {
 	fi, err := os.Stdin.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// stopContextTunnels stops the AX server tunnel and the FinOps tunnel saved
+// for a kube context. It fails only when neither exists.
+func stopContextTunnels(out io.Writer, ctxName string) error {
+	stopped := 0
+	for _, key := range []string{ctxName, tunnel.FinOpsTunnelKey(ctxName)} {
+		if err := tunnel.StopTunnelByContext(key); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("stopping tunnel %q: %w", key, err)
+		}
+		fmt.Fprintf(out, "Tunnel %q stopped\n", key)
+		stopped++
+	}
+	if stopped == 0 {
+		return fmt.Errorf("no tunnel found for context %q", ctxName)
+	}
+	return nil
 }

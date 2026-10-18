@@ -16,8 +16,11 @@ package finops
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -158,32 +161,145 @@ func TestClientGetActorCost(t *testing.T) {
 	c := NewClient(srv.URL, srv.Client())
 	ctx := context.Background()
 
-	actor, sessions, children, _, err := c.GetActorCost(ctx, "otel-bench", "coding-parent-1")
+	m, err := c.GetActorCost(ctx, "otel-bench", true, "coding-parent-1")
 	if err != nil {
 		t.Fatalf("GetActorCost by name failed: %v", err)
 	}
+	actor := m.Actor
 	if actor.UID != "6dadd6f6-2288-4dad-89fc-2134253d9b43" {
 		t.Fatalf("unexpected UID: %s", actor.UID)
 	}
-	if len(sessions) != 1 || sessions[0].SessionID != "conv-live-e2e-001" {
-		t.Fatalf("unexpected sessions: %+v", sessions)
+	if len(m.SessionCosts) != 1 || m.SessionCosts[0].SessionID != "conv-live-e2e-001" || len(m.Sessions) != 1 {
+		t.Fatalf("unexpected sessions: %+v", m.SessionCosts)
 	}
-	if len(children) != 1 || children[0].Name != "coding-sub-1" {
-		t.Fatalf("unexpected children: %+v", children)
+	if len(m.Children) != 1 || m.Children[0].Name != "coding-sub-1" || len(m.SubAgents) != 1 {
+		t.Fatalf("unexpected children: %+v", m.Children)
+	}
+	if !strings.Contains(string(m.Raw), `"measuredFullyLoadedCost"`) {
+		t.Errorf("raw actor row lost fields: %s", m.Raw)
 	}
 	if got := actor.VariableHostingUSD(); got <= 0 {
 		t.Fatalf("expected positive variable hosting cost, got %f", got)
 	}
-	if got := actor.SharedOverheadUSD(); got <= 0 {
-		t.Fatalf("expected positive shared overhead cost, got %f", got)
-	}
 
-	// Lookup by UID prefix should also work.
-	byUID, _, _, _, err := c.GetActorCost(ctx, "", "2a93284b")
+	// A unique UID prefix of at least MinUIDPrefix characters works.
+	byUID, err := c.GetActorCost(ctx, "default", false, "2a93284b")
 	if err != nil {
 		t.Fatalf("GetActorCost by UID prefix failed: %v", err)
 	}
-	if byUID.Name != "coding-sub-1" {
-		t.Fatalf("expected coding-sub-1, got %s", byUID.Name)
+	if byUID.Actor.Name != "coding-sub-1" {
+		t.Fatalf("expected coding-sub-1, got %s", byUID.Actor.Name)
+	}
+	// A shorter prefix is not a match.
+	if _, err := c.GetActorCost(ctx, "default", false, "2a93"); err == nil {
+		t.Error("a 4-character UID prefix matched")
+	}
+}
+
+// lookupServer serves a report with actors in several atespaces and records
+// the atespace each request asked for.
+func lookupServer(t *testing.T, asked *[]string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scope := r.URL.Query().Get("atespace")
+		*asked = append(*asked, scope)
+		actors := []map[string]any{
+			{"atespace": "team-a", "name": "test", "uid": "aaaaaaaa-1111-0000-0000-000000000000"},
+			{"atespace": "team-b", "name": "test", "uid": "bbbbbbbb-2222-0000-0000-000000000000"},
+			{"atespace": "team-b", "name": "only-b", "uid": "cccccccc-3333-0000-0000-000000000000"},
+			{"atespace": "team-c", "name": "again", "uid": "dddddddd-4444-0000-0000-000000000000"},
+			{"atespace": "team-c", "name": "again", "uid": "dddddddd-5555-0000-0000-000000000000"},
+			{"atespace": "", "name": "", "note": "unknown actor"},
+		}
+		var rows []map[string]any
+		for _, a := range actors {
+			if scope == "" || a["atespace"] == scope {
+				rows = append(rows, a)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"atespace": scope, "actors": rows})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestClientGetActorCost_LookupRules(t *testing.T) {
+	var asked []string
+	c := NewClient(lookupServer(t, &asked).URL, nil)
+	ctx := context.Background()
+
+	// An explicit atespace never matches outside it, and the server filters.
+	if _, err := c.GetActorCost(ctx, "team-a", true, "only-b"); err == nil {
+		t.Error("an explicit -a team-a matched team-b/only-b")
+	}
+	if asked[len(asked)-1] != "team-a" {
+		t.Errorf("request asked for atespace %q, want team-a", asked[len(asked)-1])
+	}
+	m, err := c.GetActorCost(ctx, "team-a", true, "test")
+	if err != nil || m.Actor.Atespace != "team-a" {
+		t.Fatalf("team-a/test = %+v, %v", m, err)
+	}
+
+	// Without -a, the given atespace comes first, then all atespaces.
+	if m, err := c.GetActorCost(ctx, "default", false, "only-b"); err != nil || m.Actor.Atespace != "team-b" {
+		t.Errorf("only-b without -a = %+v, %v", m, err)
+	}
+	var amb *AmbiguousError
+	if _, err := c.GetActorCost(ctx, "default", false, "test"); !errors.As(err, &amb) || len(amb.Candidates) != 2 {
+		t.Errorf("a name in two atespaces: got %v, want an AmbiguousError with 2 candidates", err)
+	}
+	if m, err := c.GetActorCost(ctx, "team-b", false, "test"); err != nil || m.Actor.Atespace != "team-b" {
+		t.Errorf("the default atespace wins: %+v, %v", m, err)
+	}
+
+	// "<atespace>/<name>" names the atespace.
+	if m, err := c.GetActorCost(ctx, "default", false, "team-b/test"); err != nil || m.Actor.UID != "bbbbbbbb-2222-0000-0000-000000000000" {
+		t.Errorf("team-b/test = %+v, %v", m, err)
+	}
+
+	// An actor made again under the same name has two records: ambiguous.
+	if _, err := c.GetActorCost(ctx, "team-c", true, "again"); !errors.As(err, &amb) {
+		t.Errorf("a recreated actor: got %v, want an AmbiguousError", err)
+	}
+	if m, err := c.GetActorCost(ctx, "team-c", true, "dddddddd-5555-0000-0000-000000000000"); err != nil || m.Actor.UID != "dddddddd-5555-0000-0000-000000000000" {
+		t.Errorf("exact UID = %+v, %v", m, err)
+	}
+	// A UID prefix that two actors share is ambiguous.
+	if _, err := c.GetActorCost(ctx, "default", false, "dddddddd"); !errors.As(err, &amb) {
+		t.Errorf("a shared UID prefix: got %v, want an AmbiguousError", err)
+	}
+	// A note row has no name and never matches.
+	if _, err := c.GetActorCost(ctx, "default", false, ""); err == nil {
+		t.Error("an empty name matched a note row")
+	}
+}
+
+func TestClientSendsAtespaceAndKeepsRawBody(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"atespace":"team-a","costBasis":"estimated","futureField":{"x":1},"actors":[],"totals":{"unknownCostCalls":2}}`))
+	}))
+	defer srv.Close()
+	report, raw, err := NewClient(srv.URL, nil).GetCosts(context.Background(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "atespace=team-a" {
+		t.Errorf("query = %q, want atespace=team-a", gotQuery)
+	}
+	if !strings.Contains(string(raw), "futureField") {
+		t.Errorf("raw body lost a field the client does not know: %s", raw)
+	}
+	if !report.Estimated() || report.Totals.UnknownCostCalls != 2 || report.Atespace != "team-a" {
+		t.Errorf("report = %+v", report)
+	}
+	if (CostReport{CostBasis: "reconciled"}).Estimated() {
+		t.Error("a reconciled report counted as an estimate")
+	}
+	if !(CostReport{}).Estimated() {
+		t.Error("a report with no cost basis did not count as an estimate")
 	}
 }
