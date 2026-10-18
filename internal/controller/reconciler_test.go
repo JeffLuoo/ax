@@ -43,6 +43,7 @@ type mockControlServer struct {
 	suspendErr        error
 	deletedActors     []string
 	actorTemplates    map[string]bool
+	createdTemplates  []*ateapipb.ActorTemplate
 	deletedTemplates  []string
 	getActorFunc      func(ctx context.Context, req *ateapipb.GetActorRequest) (*ateapipb.Actor, error)
 	createAtespaceErr error
@@ -71,6 +72,7 @@ func (m *mockControlServer) CreateActorTemplate(_ context.Context, req *ateapipb
 	}
 	tmpl := req.GetActorTemplate()
 	m.actorTemplates[tmpl.GetMetadata().GetName()] = true
+	m.createdTemplates = append(m.createdTemplates, tmpl)
 	return tmpl, nil
 }
 
@@ -792,4 +794,110 @@ func TestTaskReconciler_TransientSubstrateUnavailable(t *testing.T) {
 		t.Errorf("expected Phase='Failed' on permanent error, got %q", reconciled4.GetStatus().GetPhase())
 	}
 	mockSrv.createActorErr = nil
+}
+
+func TestTaskLimits(t *testing.T) {
+	defaults := substrate.Limits{CPU: "1", Memory: "2Gi"}
+	tests := []struct {
+		name string
+		res  *v1alpha1.ResourcesSpec
+		want substrate.Limits
+	}{
+		{name: "no resources", want: defaults},
+		{
+			name: "limits win over requests",
+			res: &v1alpha1.ResourcesSpec{
+				Requests: &v1alpha1.ResourceList{Cpu: "500m", Memory: "1Gi"},
+				Limits:   &v1alpha1.ResourceList{Cpu: "2", Memory: "4Gi"},
+			},
+			want: substrate.Limits{CPU: "2", Memory: "4Gi"},
+		},
+		{
+			name: "requests stand in for limits",
+			res:  &v1alpha1.ResourcesSpec{Requests: &v1alpha1.ResourceList{Cpu: "250m", Memory: "512Mi"}},
+			want: substrate.Limits{CPU: "250m", Memory: "512Mi"},
+		},
+		{
+			name: "each field falls back on its own",
+			res:  &v1alpha1.ResourcesSpec{Limits: &v1alpha1.ResourceList{Cpu: "4"}, Requests: &v1alpha1.ResourceList{Memory: "8Gi"}},
+			want: substrate.Limits{CPU: "4", Memory: "8Gi"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := controller.TaskLimits(&v1alpha1.TaskSpec{Resources: tt.res}, defaults); got != tt.want {
+				t.Errorf("TaskLimits = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskReconciler_TemplateCarriesLimits(t *testing.T) {
+	ctx := context.Background()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer lis.Close()
+	mockSrv := &mockControlServer{}
+	grpcServer := grpc.NewServer()
+	ateapipb.RegisterControlServer(grpcServer, mockSrv)
+	go grpcServer.Serve(lis)
+	defer grpcServer.Stop()
+	client, err := substrate.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to create substrate client: %v", err)
+	}
+	defer client.Close()
+
+	reconciler := controller.NewTaskReconciler(client, "test-template", v1alpha1.DefaultSystemNamespace)
+	reconciler.SecretResolver = noSecrets
+	newTask := func(res *v1alpha1.ResourcesSpec) *v1alpha1.Task {
+		return &v1alpha1.Task{
+			Metadata: &v1alpha1.ObjectMeta{Name: "sized", Atespace: "default"},
+			Spec:     &v1alpha1.TaskSpec{Image: "img", Resources: res},
+			Status:   &v1alpha1.TaskStatus{Phase: "Suspended"},
+		}
+	}
+	limitsOf := func(tmpl *ateapipb.ActorTemplate) map[string]string {
+		out := map[string]string{}
+		for _, l := range tmpl.GetResources().GetLimits() {
+			out[l.GetName()] = l.GetQuantity()
+		}
+		return out
+	}
+
+	// The spec's limits size the sandbox.
+	if _, err := reconciler.Reconcile(ctx, newTask(&v1alpha1.ResourcesSpec{Limits: &v1alpha1.ResourceList{Cpu: "2", Memory: "4Gi"}})); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	// A task with no resources gets the server defaults.
+	if _, err := reconciler.Reconcile(ctx, newTask(nil)); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	// New server defaults, with no change to the spec, make a new template.
+	reconciler.DefaultLimits = substrate.Limits{CPU: "500m", Memory: "1Gi"}
+	if _, err := reconciler.Reconcile(ctx, newTask(nil)); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if len(mockSrv.createdTemplates) != 3 {
+		t.Fatalf("created %d templates, want 3 (one for each distinct size)", len(mockSrv.createdTemplates))
+	}
+	wants := []map[string]string{
+		{"cpu": "2", "memory": "4Gi"},
+		{"cpu": controller.DefaultTaskCPU, "memory": controller.DefaultTaskMemory},
+		{"cpu": "500m", "memory": "1Gi"},
+	}
+	names := map[string]bool{}
+	for i, tmpl := range mockSrv.createdTemplates {
+		got := limitsOf(tmpl)
+		if len(got) != 2 || got["cpu"] != wants[i]["cpu"] || got["memory"] != wants[i]["memory"] {
+			t.Errorf("template %d limits = %v, want %v", i, got, wants[i])
+		}
+		names[tmpl.GetMetadata().GetName()] = true
+	}
+	if len(names) != 3 {
+		t.Errorf("template names = %v, want 3 distinct names", names)
+	}
 }

@@ -46,6 +46,8 @@ func main() {
 		substratePlaintext      bool
 		defaultTemplate         string
 		defaultTemplateAtespace string
+		defaultTaskCPU          string
+		defaultTaskMemory       string
 	)
 
 	flag.StringVar(&listenAddr, "addr", ":8080", "HTTP listen address")
@@ -59,7 +61,16 @@ func main() {
 	flag.BoolVar(&substratePlaintext, "substrate-plaintext", false, "Use insecure plaintext gRPC connection to Substrate")
 	flag.StringVar(&defaultTemplate, "template", "default-template", "Default Substrate ActorTemplate name")
 	flag.StringVar(&defaultTemplateAtespace, "template-atespace", v1alpha1.DefaultSystemNamespace, "Default Substrate ActorTemplate atespace")
+	flag.StringVar(&defaultTaskCPU, "default-task-cpu", controller.DefaultTaskCPU, "Sandbox CPU limit for a task that sets no spec.resources")
+	flag.StringVar(&defaultTaskMemory, "default-task-memory", controller.DefaultTaskMemory, "Sandbox memory limit for a task that sets no spec.resources")
 	flag.Parse()
+
+	for name, q := range map[string]string{"--default-task-cpu": defaultTaskCPU, "--default-task-memory": defaultTaskMemory} {
+		if err := v1alpha1.ValidateQuantity(q); err != nil {
+			slog.Error("invalid flag value", "flag", name, "value", q, "error", err)
+			os.Exit(2)
+		}
+	}
 
 	if envAddr := os.Getenv("ADDR"); envAddr != "" {
 		listenAddr = envAddr
@@ -103,7 +114,9 @@ func main() {
 		slog.Warn("could not initialize substrate client; running without substrate reconciliation", "error", err)
 	} else {
 		defer subClient.Close()
-		reconciler = controller.NewTaskReconciler(subClient, defaultTemplate, defaultTemplateAtespace)
+		tr := controller.NewTaskReconciler(subClient, defaultTemplate, defaultTemplateAtespace)
+		tr.DefaultLimits = substrate.Limits{CPU: defaultTaskCPU, Memory: defaultTaskMemory}
+		reconciler = tr
 	}
 
 	srv := server.NewServer(rStore, server.Options{

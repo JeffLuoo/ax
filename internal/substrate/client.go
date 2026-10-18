@@ -290,8 +290,36 @@ func retryOnCodes(ctx context.Context, fn func() error, retryable ...codes.Code)
 	return err
 }
 
-// BuildActorTemplate constructs a Substrate ActorTemplate based on the standard ate-env specification.
-func BuildActorTemplate(atespace, name, image string, envMap map[string]string, command []string, snapshotsBucket string) *ateapipb.ActorTemplate {
+// Limits is the size of an actor's sandbox: its cpu and memory limits, as
+// Kubernetes quantity strings such as "500m" or "2Gi". Agent Substrate sizes
+// the sandbox from them and books that size on a worker.
+type Limits struct {
+	CPU    string
+	Memory string
+}
+
+// IsZero reports whether no limit is set.
+func (l Limits) IsZero() bool { return l.CPU == "" && l.Memory == "" }
+
+// resources returns the template's resources block, or nil when no limit is set.
+func (l Limits) resources() *ateapipb.Resources {
+	if l.IsZero() {
+		return nil
+	}
+	r := &ateapipb.Resources{}
+	if l.CPU != "" {
+		r.Limits = append(r.Limits, &ateapipb.Limits{Name: "cpu", Quantity: l.CPU})
+	}
+	if l.Memory != "" {
+		r.Limits = append(r.Limits, &ateapipb.Limits{Name: "memory", Quantity: l.Memory})
+	}
+	return r
+}
+
+// BuildActorTemplate constructs a Substrate ActorTemplate based on the standard
+// ate-env specification. limits sets the sandbox size; Agent Substrate requires
+// both a cpu and a memory limit.
+func BuildActorTemplate(atespace, name, image string, envMap map[string]string, command []string, snapshotsBucket string, limits Limits) *ateapipb.ActorTemplate {
 	if atespace == "" {
 		atespace = "default"
 	}
@@ -350,24 +378,21 @@ func BuildActorTemplate(atespace, name, image string, envMap map[string]string, 
 			SandboxClass: ateapipb.SandboxClass_SANDBOX_CLASS_GVISOR,
 			ConfigName:   "gvisor-default",
 		},
+		Resources: limits.resources(),
 	}
 }
 
-// EnsureActorTemplateWithImage creates an ActorTemplate using the specified container image and optional environment variables.
-func (c *Client) EnsureActorTemplateWithImage(ctx context.Context, baseAtespace, baseTemplate, targetAtespace, targetTemplate, image string, extraEnv ...map[string]string) (*ateapipb.ActorTemplate, error) {
+// EnsureActorTemplateWithImage creates an ActorTemplate with the given container
+// image, sandbox limits, and environment variables, unless it already exists.
+// The name must change whenever any of them changes, because a template is
+// immutable.
+func (c *Client) EnsureActorTemplateWithImage(ctx context.Context, baseAtespace, baseTemplate, targetAtespace, targetTemplate, image string, limits Limits, env map[string]string) (*ateapipb.ActorTemplate, error) {
 	existing, err := c.GetActorTemplate(ctx, targetAtespace, targetTemplate)
 	if err == nil && existing != nil {
 		return existing, nil
 	}
 
-	envMap := make(map[string]string)
-	for _, envs := range extraEnv {
-		for k, v := range envs {
-			envMap[k] = v
-		}
-	}
-
-	tmpl := BuildActorTemplate(targetAtespace, targetTemplate, image, envMap, nil, "")
+	tmpl := BuildActorTemplate(targetAtespace, targetTemplate, image, env, nil, "", limits)
 	req := &ateapipb.CreateActorTemplateRequest{
 		ActorTemplate: tmpl,
 	}

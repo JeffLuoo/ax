@@ -71,6 +71,37 @@ type TaskReconciler struct {
 	// WorkspaceReadyTimeout bounds how long Reconcile waits for the actor's workspace
 	// to report ready before recording it as still initializing.
 	WorkspaceReadyTimeout time.Duration
+
+	// DefaultLimits is the sandbox size of a task that sets neither
+	// spec.resources.limits nor spec.resources.requests.
+	DefaultLimits substrate.Limits
+}
+
+// Default sandbox size, used when ax-server is not given another.
+const (
+	DefaultTaskCPU    = "1"
+	DefaultTaskMemory = "2Gi"
+)
+
+// TaskLimits returns the sandbox size for a task: each of cpu and memory comes
+// from spec.resources.limits, else from spec.resources.requests, else from
+// defaults. Agent Substrate sizes an actor by its limits only, so requests
+// stand in for limits when a task sets only requests.
+func TaskLimits(spec *v1alpha1.TaskSpec, defaults substrate.Limits) substrate.Limits {
+	limits, requests := spec.GetResources().GetLimits(), spec.GetResources().GetRequests()
+	return substrate.Limits{
+		CPU:    firstSet(limits.GetCpu(), requests.GetCpu(), defaults.CPU),
+		Memory: firstSet(limits.GetMemory(), requests.GetMemory(), defaults.Memory),
+	}
+}
+
+func firstSet(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // NewTaskReconciler creates a new TaskReconciler.
@@ -88,6 +119,7 @@ func NewTaskReconciler(client *substrate.Client, defaultTemplate, defaultTemplat
 		defaultTemplateAtespace: defaultTemplateAtespace,
 		SecretResolver:          model.GetKubernetesSecret,
 		WorkspaceReadyTimeout:   defaultWorkspaceReadyTimeout,
+		DefaultLimits:           substrate.Limits{CPU: DefaultTaskCPU, Memory: DefaultTaskMemory},
 	}
 }
 
@@ -175,9 +207,10 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, wor
 	// If a custom image, workspace, or extra environment is specified, provision or use a dedicated ActorTemplate
 	if task.Spec != nil && (task.Spec.Image != "" || len(extraEnv) > 0) {
 		slog.Info("ensuring custom ActorTemplate for task", "image", task.Spec.Image)
-		customTemplateName := taskTemplateName(task.Metadata.Name, task.Spec.Image, extraEnv)
+		limits := TaskLimits(task.Spec, r.DefaultLimits)
+		customTemplateName := taskTemplateName(task.Metadata.Name, task.Spec.Image, limits, extraEnv)
 
-		tmpl, err := r.client.EnsureActorTemplateWithImage(ctx, templateAtespace, templateName, atespace, customTemplateName, task.Spec.Image, extraEnv)
+		tmpl, err := r.client.EnsureActorTemplateWithImage(ctx, templateAtespace, templateName, atespace, customTemplateName, task.Spec.Image, limits, extraEnv)
 		if err != nil {
 			slog.Warn("could not create custom ActorTemplate, falling back to default template", "error", err)
 		} else if tmpl != nil && tmpl.Metadata != nil {
@@ -382,10 +415,13 @@ func (r *TaskReconciler) lookupGeminiKey(ctx context.Context, atespace string) s
 }
 
 // taskTemplateName derives the per-task ActorTemplate name from the task name and a
-// digest of the image and container environment, so a spec change yields a new template.
-func taskTemplateName(taskName, image string, env map[string]string) string {
+// digest of the image, the sandbox limits, and the container environment, so a
+// change to any of them yields a new template. The limits are hashed on their
+// own because a new ax-server default changes them with no change to the spec.
+func taskTemplateName(taskName, image string, limits substrate.Limits, env map[string]string) string {
 	h := sha256.New()
 	h.Write([]byte(image))
+	h.Write([]byte("\x00cpu=" + limits.CPU + "\x00memory=" + limits.Memory + "\x00"))
 	keys := make([]string, 0, len(env))
 	for k := range env {
 		keys = append(keys, k)

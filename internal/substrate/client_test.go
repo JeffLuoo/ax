@@ -203,7 +203,7 @@ func TestClient_DeleteActor_PropagatesRPCError(t *testing.T) {
 func TestBuildActorTemplate(t *testing.T) {
 	t.Setenv("AX_SNAPSHOTS_BUCKET", "gs://ate-snapshots/ax/")
 
-	tmpl := BuildActorTemplate("", "test-tmpl", "", map[string]string{"FOO": "BAR"}, nil, "")
+	tmpl := BuildActorTemplate("", "test-tmpl", "", map[string]string{"FOO": "BAR"}, nil, "", Limits{CPU: "500m", Memory: "1Gi"})
 	if tmpl.GetMetadata().GetAtespace() != "default" {
 		t.Errorf("expected default atespace, got %q", tmpl.GetMetadata().GetAtespace())
 	}
@@ -227,6 +227,17 @@ func TestBuildActorTemplate(t *testing.T) {
 	}
 	if snapCfg.GetPreferredFidelity() != ateapipb.SnapshotFidelity_SNAPSHOT_FIDELITY_VOLUMES {
 		t.Errorf("expected PreferredFidelity VOLUMES, got %v", snapCfg.GetPreferredFidelity())
+	}
+	got := map[string]string{}
+	for _, l := range tmpl.GetResources().GetLimits() {
+		got[l.GetName()] = l.GetQuantity()
+	}
+	if len(got) != 2 || got["cpu"] != "500m" || got["memory"] != "1Gi" {
+		t.Errorf("resources.limits = %v, want cpu=500m memory=1Gi", got)
+	}
+
+	if bare := BuildActorTemplate("", "bare", "", nil, nil, "", Limits{}); bare.GetResources() != nil {
+		t.Errorf("a template without limits got resources %v", bare.GetResources())
 	}
 }
 
@@ -312,6 +323,7 @@ func TestClient_EnsureActorTemplateWithImage_Success(t *testing.T) {
 		"default",
 		"task-1-tmpl-abcd",
 		"custom-image:v1",
+		Limits{CPU: "2", Memory: "4Gi"},
 		map[string]string{"FOO": "BAR"},
 	)
 	if err != nil {
@@ -328,6 +340,9 @@ func TestClient_EnsureActorTemplateWithImage_Success(t *testing.T) {
 	defer mock.mu.Unlock()
 	if len(mock.createdTemplates) != 1 {
 		t.Fatalf("expected 1 CreateActorTemplate request, got %d", len(mock.createdTemplates))
+	}
+	if r := mock.createdTemplates[0].GetResources().GetLimits(); len(r) != 2 || r[0].GetQuantity() != "2" || r[1].GetQuantity() != "4Gi" {
+		t.Errorf("created template limits = %v, want cpu 2 and memory 4Gi", r)
 	}
 }
 
@@ -346,6 +361,8 @@ func TestClient_EnsureActorTemplateWithImage_PropagatesError(t *testing.T) {
 		"default",
 		"task-1-tmpl-abcd",
 		"custom-image:v1",
+		Limits{},
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected error, got nil")
