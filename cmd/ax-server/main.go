@@ -49,6 +49,9 @@ func main() {
 		defaultTemplateAtespace string
 		defaultTaskCPU          string
 		defaultTaskMemory       string
+		routerAddr              string
+		outcomePollInterval     time.Duration
+		outcomePollConcurrency  int
 	)
 
 	flag.StringVar(&listenAddr, "addr", ":8080", "HTTP listen address")
@@ -64,6 +67,9 @@ func main() {
 	flag.StringVar(&defaultTemplateAtespace, "template-atespace", v1alpha1.DefaultSystemNamespace, "Default Substrate ActorTemplate atespace")
 	flag.StringVar(&defaultTaskCPU, "default-task-cpu", controller.DefaultTaskCPU, "Sandbox CPU limit for a task that sets no spec.resources")
 	flag.StringVar(&defaultTaskMemory, "default-task-memory", controller.DefaultTaskMemory, "Sandbox memory limit for a task that sets no spec.resources")
+	flag.StringVar(&routerAddr, "router-addr", os.Getenv("ATENET_ROUTER_ADDR"), "atenet router host:port, for reading each running task's command state (default $ATENET_ROUTER_ADDR)")
+	flag.DurationVar(&outcomePollInterval, "outcome-poll-interval", server.DefaultOutcomePollInterval, "Time between reads of the command state of running tasks; 0 turns task outcomes off")
+	flag.IntVar(&outcomePollConcurrency, "outcome-poll-concurrency", server.DefaultOutcomePollConcurrency, "Most command state requests in flight at a time")
 	flag.Parse()
 
 	for name, q := range map[string]string{"--default-task-cpu": defaultTaskCPU, "--default-task-memory": defaultTaskMemory} {
@@ -146,6 +152,14 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if outcomePollInterval > 0 {
+		go srv.RunOutcomePoller(ctx, server.OutcomePollerOptions{
+			RouterAddr:  routerAddr,
+			Interval:    outcomePollInterval,
+			Concurrency: outcomePollConcurrency,
+		})
+	}
 
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
