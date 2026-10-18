@@ -578,10 +578,11 @@ func (c *Client) GetActorCost(ctx context.Context, atespace string, atespaceExpl
 	matched := &report.Actors[idx]
 	m := &ActorMatch{Actor: matched, Raw: rawReport.Actors[idx], Report: report}
 	fullName := matched.Atespace + "/" + matched.Name
+	canonicalIdx := canonicalActorForName(report.Actors, matched.Atespace, matched.Name, idx)
 	for i, s := range report.Sessions {
 		mine := s.ActorUID != "" && s.ActorUID == matched.UID
 		if s.ActorUID == "" || matched.UID == "" {
-			mine = s.Actor == fullName && (s.Atespace == "" || s.Atespace == matched.Atespace)
+			mine = idx == canonicalIdx && s.Actor == fullName && (s.Atespace == "" || s.Atespace == matched.Atespace)
 		}
 		if mine {
 			m.Sessions = append(m.Sessions, rawReport.Sessions[i])
@@ -592,7 +593,7 @@ func (c *Client) GetActorCost(ctx context.Context, atespace string, atespaceExpl
 		if i == idx || a.Note != "" || a.ParentAgentID == "" {
 			continue
 		}
-		if (matched.UID != "" && a.ParentAgentID == matched.UID) || a.ParentAgentID == fullName {
+		if (matched.UID != "" && a.ParentAgentID == matched.UID) || (idx == canonicalIdx && a.ParentAgentID == fullName && a.Tenant == matched.Tenant) {
 			m.SubAgents = append(m.SubAgents, rawReport.Actors[i])
 			m.Children = append(m.Children, a)
 		}
@@ -677,4 +678,50 @@ func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out
 		return nil, fmt.Errorf("decoding %s%s: %w", c.baseURL, path, err)
 	}
 	return body, nil
+}
+
+func latestActorTimestamp(a ActorCost) string {
+	if a.LastCall > a.Compute.LastLease {
+		return a.LastCall
+	}
+	return a.Compute.LastLease
+}
+
+func preferActorForName(cand, curr ActorCost) bool {
+	if (cand.SubAgents > 0) != (curr.SubAgents > 0) {
+		return cand.SubAgents > 0
+	}
+	if (cand.Compute.OpenLeases > 0) != (curr.Compute.OpenLeases > 0) {
+		return cand.Compute.OpenLeases > 0
+	}
+	candLast, currLast := latestActorTimestamp(cand), latestActorTimestamp(curr)
+	if candLast != currLast {
+		return candLast > currLast
+	}
+	if cand.Compute.LastLease != curr.Compute.LastLease {
+		return cand.Compute.LastLease > curr.Compute.LastLease
+	}
+	if cand.LastCall != curr.LastCall {
+		return cand.LastCall > curr.LastCall
+	}
+	return cand.UID > curr.UID
+}
+
+func canonicalActorForName(actors []ActorCost, atespace, name string, fallback int) int {
+	if atespace == "" || name == "" {
+		return fallback
+	}
+	best := -1
+	for i, a := range actors {
+		if a.Note != "" || a.Atespace != atespace || a.Name != name {
+			continue
+		}
+		if best == -1 || preferActorForName(a, actors[best]) {
+			best = i
+		}
+	}
+	if best == -1 {
+		return fallback
+	}
+	return best
 }

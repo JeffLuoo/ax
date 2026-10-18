@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // ClientOptions configures connection to the Substrate Control API server.
@@ -387,12 +388,51 @@ func BuildActorTemplate(atespace, name, image string, envMap map[string]string, 
 // The name must change whenever any of them changes, because a template is
 // immutable.
 func (c *Client) EnsureActorTemplateWithImage(ctx context.Context, baseAtespace, baseTemplate, targetAtespace, targetTemplate, image string, limits Limits, env map[string]string) (*ateapipb.ActorTemplate, error) {
+	var base *ateapipb.ActorTemplate
+	if baseTemplate != "" {
+		base, _ = c.GetActorTemplate(ctx, baseAtespace, baseTemplate)
+	}
+	waitGolden := base != nil && base.GetStatus().GetGoldenSnapshotStatus().GetGoldenTag() != nil
+
 	existing, err := c.GetActorTemplate(ctx, targetAtespace, targetTemplate)
 	if err == nil && existing != nil {
+		if waitGolden && existing.GetStatus().GetGoldenSnapshotStatus().GetGoldenTag() == nil {
+			return c.waitGoldenSnapshot(ctx, targetAtespace, targetTemplate)
+		}
 		return existing, nil
 	}
 
 	tmpl := BuildActorTemplate(targetAtespace, targetTemplate, image, env, nil, "", limits)
+	if base != nil {
+		if tmpl.WorkerSelector == nil && base.GetWorkerSelector() != nil {
+			tmpl.WorkerSelector = proto.Clone(base.GetWorkerSelector()).(*ateapipb.Selector)
+		}
+		if base.GetSnapshotConfig() != nil {
+			sc := proto.Clone(base.GetSnapshotConfig()).(*ateapipb.SnapshotConfig)
+			if base.GetSnapshotConfig().GetStorageLocation() != "" {
+				loc := strings.TrimSpace(os.Getenv("AX_SNAPSHOTS_BUCKET"))
+				if loc == "" {
+					baseLoc := strings.TrimRight(base.GetSnapshotConfig().GetStorageLocation(), "/")
+					suffix := "/" + strings.Trim(baseAtespace, "/") + "/" + strings.Trim(baseTemplate, "/")
+					if strings.HasSuffix(baseLoc, suffix) {
+						loc = strings.TrimSuffix(baseLoc, suffix)
+					} else if idx := strings.Index(baseLoc, "://"); idx != -1 {
+						rest := baseLoc[idx+3:]
+						if slash := strings.IndexByte(rest, '/'); slash != -1 {
+							loc = baseLoc[:idx+3+slash]
+						} else {
+							loc = baseLoc
+						}
+					}
+				}
+				loc = strings.TrimRight(loc, "/")
+				if loc != "" {
+					sc.StorageLocation = fmt.Sprintf("%s/%s/%s/", loc, targetAtespace, targetTemplate)
+				}
+			}
+			tmpl.SnapshotConfig = sc
+		}
+	}
 	req := &ateapipb.CreateActorTemplateRequest{
 		ActorTemplate: tmpl,
 	}
@@ -405,10 +445,39 @@ func (c *Client) EnsureActorTemplateWithImage(ctx context.Context, baseAtespace,
 	if err != nil && status.Code(err) != codes.AlreadyExists {
 		return nil, fmt.Errorf("creating actor template %s/%s: %w", targetAtespace, targetTemplate, err)
 	}
+	if waitGolden {
+		return c.waitGoldenSnapshot(ctx, targetAtespace, targetTemplate)
+	}
 	if created != nil {
 		return created, nil
 	}
 	return c.GetActorTemplate(ctx, targetAtespace, targetTemplate)
+}
+
+var goldenSnapshotPollInterval = 1 * time.Second
+
+func (c *Client) waitGoldenSnapshot(ctx context.Context, atespace, templateName string) (*ateapipb.ActorTemplate, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(goldenSnapshotPollInterval)
+	defer ticker.Stop()
+	for {
+		tmpl, err := c.GetActorTemplate(waitCtx, atespace, templateName)
+		if err == nil && tmpl != nil {
+			gs := tmpl.GetStatus().GetGoldenSnapshotStatus()
+			if gs.GetErrorMessage() != "" {
+				return nil, fmt.Errorf("golden snapshot for %s/%s failed: %s", atespace, templateName, gs.GetErrorMessage())
+			}
+			if gs.GetGoldenTag() != nil {
+				return tmpl, nil
+			}
+		}
+		select {
+		case <-waitCtx.Done():
+			return tmpl, fmt.Errorf("waiting for golden snapshot on %s/%s: %w", atespace, templateName, waitCtx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // EnsureActor creates an Actor in the specified atespace deriving from an ActorTemplate.
@@ -451,6 +520,7 @@ func (c *Client) EnsureActor(ctx context.Context, atespace, actorName, templateA
 					}, codes.Unavailable)
 					if revertErr == nil {
 						slog.Warn("existing actor is crashed, reverted to its last snapshot", "actor", actorName)
+						c.ensureDefaultEgressPolicy(ctx, atespace, actorName)
 						return reverted.GetActor(), nil
 					}
 					slog.Warn("existing actor is crashed and could not be reverted, deleting and recreating", "actor", actorName, "error", revertErr)
@@ -463,6 +533,7 @@ func (c *Client) EnsureActor(ctx context.Context, atespace, actorName, templateA
 						return err
 					}, codes.Unavailable)
 					if err == nil {
+						c.ensureDefaultEgressPolicy(ctx, atespace, actorName)
 						return actor, nil
 					}
 					return nil, fmt.Errorf("recreating actor %s/%s after crash: %w", atespace, actorName, err)
@@ -477,6 +548,7 @@ func (c *Client) EnsureActor(ctx context.Context, atespace, actorName, templateA
 						}
 						actor, err = c.control.CreateActor(ctx, req)
 						if err == nil {
+							c.ensureDefaultEgressPolicy(ctx, atespace, actorName)
 							return actor, nil
 						}
 						if status.Code(err) != codes.AlreadyExists {
@@ -486,11 +558,38 @@ func (c *Client) EnsureActor(ctx context.Context, atespace, actorName, templateA
 					return nil, fmt.Errorf("actor %s/%s is still deleting; please retry", atespace, actorName)
 				}
 			}
+			c.ensureDefaultEgressPolicy(ctx, atespace, actorName)
 			return existing, getErr
 		}
 		return nil, fmt.Errorf("creating actor %s/%s: %w", atespace, actorName, err)
 	}
+	c.ensureDefaultEgressPolicy(ctx, atespace, actorName)
 	return actor, nil
+}
+
+func (c *Client) ensureDefaultEgressPolicy(ctx context.Context, atespace, actorName string) {
+	raw := strings.TrimSpace(os.Getenv("AX_DEFAULT_EGRESS_HOSTS"))
+	if raw == "" {
+		return
+	}
+	var hosts []string
+	for _, h := range strings.Split(raw, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	if len(hosts) == 0 {
+		return
+	}
+	_, _ = c.control.CreateActorEgressPolicy(ctx, &ateapipb.CreateActorEgressPolicyRequest{
+		Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
+		EgressPolicy: &ateapipb.EgressPolicy{
+			Metadata: &ateapipb.ResourceMetadata{Atespace: atespace, Name: "default"},
+			Rules: []*ateapipb.EgressRule{{
+				Http: &ateapipb.HTTPRule{Hostnames: hosts},
+			}},
+		},
+	})
 }
 
 // ResumeActor resumes the specified actor onto a worker and returns the worker details.

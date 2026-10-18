@@ -43,6 +43,30 @@ type mockControlClient struct {
 	templates           map[string]*ateapipb.ActorTemplate
 	createTemplateErrs  []error
 	createdTemplates    []*ateapipb.ActorTemplate
+	createActorErrs     []error
+	createdActors       []*ateapipb.Actor
+	egressPolicies      []*ateapipb.CreateActorEgressPolicyRequest
+}
+
+func (m *mockControlClient) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequest, opts ...grpc.CallOption) (*ateapipb.Actor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.createActorErrs) > 0 {
+		err := m.createActorErrs[0]
+		m.createActorErrs = m.createActorErrs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	m.createdActors = append(m.createdActors, req.GetActor())
+	return req.GetActor(), nil
+}
+
+func (m *mockControlClient) CreateActorEgressPolicy(ctx context.Context, req *ateapipb.CreateActorEgressPolicyRequest, opts ...grpc.CallOption) (*ateapipb.EgressPolicy, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.egressPolicies = append(m.egressPolicies, req)
+	return req.GetEgressPolicy(), nil
 }
 
 func (m *mockControlClient) GetActorTemplate(ctx context.Context, req *ateapipb.GetActorTemplateRequest, opts ...grpc.CallOption) (*ateapipb.ActorTemplate, error) {
@@ -461,5 +485,105 @@ func TestIsTransientError(t *testing.T) {
 	}
 	if IsTransientError(status.Error(codes.InvalidArgument, "bad spec")) {
 		t.Error("expected codes.InvalidArgument to be non-transient")
+	}
+}
+
+func TestClient_EnsureActorTemplateWithImage_InheritsBaseAndWaitsGolden(t *testing.T) {
+	oldPoll := goldenSnapshotPollInterval
+	goldenSnapshotPollInterval = 5 * time.Millisecond
+	defer func() { goldenSnapshotPollInterval = oldPoll }()
+
+	baseTmpl := &ateapipb.ActorTemplate{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: "otel-bench", Name: "finops-e2e-agent"},
+		WorkerSelector: &ateapipb.Selector{
+			MatchLabels: map[string]string{"ate.dev/pool": "finops-e2e"},
+		},
+		SnapshotConfig: &ateapipb.SnapshotConfig{
+			StorageLocation:   "gs://snapshot-substrate-test-jeffluoo-gke-dev/otel-bench/finops-e2e-agent/",
+			PreferredFidelity: ateapipb.SnapshotFidelity_SNAPSHOT_FIDELITY_ROOTFS,
+		},
+		Status: &ateapipb.ActorTemplateStatus{
+			GoldenSnapshotStatus: &ateapipb.GoldenSnapshotStatus{
+				GoldenTag: &ateapipb.ObjectRef{Name: "golden-1"},
+			},
+		},
+	}
+	mock := &mockControlClient{
+		templates: map[string]*ateapipb.ActorTemplate{
+			"otel-bench/finops-e2e-agent": baseTmpl,
+		},
+	}
+	c := &Client{control: mock}
+
+	// Simulate golden snapshot completing shortly after CreateActorTemplate.
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		mock.mu.Lock()
+		mock.templates["otel-bench/task-1-tmpl-abcd"] = &ateapipb.ActorTemplate{
+			Metadata: &ateapipb.ResourceMetadata{Atespace: "otel-bench", Name: "task-1-tmpl-abcd"},
+			Status: &ateapipb.ActorTemplateStatus{
+				GoldenSnapshotStatus: &ateapipb.GoldenSnapshotStatus{
+					GoldenTag: &ateapipb.ObjectRef{Name: "golden-2"},
+				},
+			},
+		}
+		mock.mu.Unlock()
+	}()
+
+	got, err := c.EnsureActorTemplateWithImage(
+		context.Background(),
+		"otel-bench",
+		"finops-e2e-agent",
+		"otel-bench",
+		"task-1-tmpl-abcd",
+		"custom-image:v1",
+		Limits{CPU: "250m", Memory: "512Mi"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("EnsureActorTemplateWithImage failed: %v", err)
+	}
+	if got.GetStatus().GetGoldenSnapshotStatus().GetGoldenTag().GetName() != "golden-2" {
+		t.Errorf("expected golden-2 tag, got %+v", got.GetStatus())
+	}
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.createdTemplates) != 1 {
+		t.Fatalf("expected 1 created template, got %d", len(mock.createdTemplates))
+	}
+	created := mock.createdTemplates[0]
+	if created.GetWorkerSelector().GetMatchLabels()["ate.dev/pool"] != "finops-e2e" {
+		t.Errorf("worker selector not inherited: %+v", created.GetWorkerSelector())
+	}
+	wantLoc := "gs://snapshot-substrate-test-jeffluoo-gke-dev/otel-bench/task-1-tmpl-abcd/"
+	if created.GetSnapshotConfig().GetStorageLocation() != wantLoc {
+		t.Errorf("storage location = %q, want %q", created.GetSnapshotConfig().GetStorageLocation(), wantLoc)
+	}
+	if created.GetSnapshotConfig().GetPreferredFidelity() != ateapipb.SnapshotFidelity_SNAPSHOT_FIDELITY_ROOTFS {
+		t.Errorf("preferred fidelity = %v, want SYSTREE", created.GetSnapshotConfig().GetPreferredFidelity())
+	}
+}
+
+func TestClient_EnsureActor_DefaultEgressPolicy(t *testing.T) {
+	t.Setenv("AX_DEFAULT_EGRESS_HOSTS", "mock-e2e.ate-finops.svc.cluster.local, *.ate-finops.svc.cluster.local")
+	mock := &mockControlClient{}
+	c := &Client{control: mock}
+
+	if _, err := c.EnsureActor(context.Background(), "otel-bench", "ax-parent-live", "otel-bench", "tmpl-1"); err != nil {
+		t.Fatalf("EnsureActor failed: %v", err)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.egressPolicies) != 1 {
+		t.Fatalf("expected 1 egress policy, got %d", len(mock.egressPolicies))
+	}
+	req := mock.egressPolicies[0]
+	if req.GetActor().GetAtespace() != "otel-bench" || req.GetActor().GetName() != "ax-parent-live" {
+		t.Errorf("unexpected actor ref: %+v", req.GetActor())
+	}
+	rules := req.GetEgressPolicy().GetRules()
+	if len(rules) != 1 || len(rules[0].GetHttp().GetHostnames()) != 2 {
+		t.Errorf("unexpected policy rules: %+v", rules)
 	}
 }

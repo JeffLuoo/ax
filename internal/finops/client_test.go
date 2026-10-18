@@ -303,3 +303,56 @@ func TestClientSendsAtespaceAndKeepsRawBody(t *testing.T) {
 		t.Error("a report with no cost basis did not count as an estimate")
 	}
 }
+
+func TestClientGetActorCost_RecreatedParentSubAgentsMatchCanonicalOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "actors": [
+    {
+      "atespace": "otel-bench",
+      "name": "ax-parent-r2",
+      "uid": "e32d3de1-4053-4c32-8068-0fa736b02d69",
+      "tenant": "tenant-alpha",
+      "subAgents": 0,
+      "compute": {"lastLease": "2026-10-18T16:23:19Z"}
+    },
+    {
+      "atespace": "otel-bench",
+      "name": "ax-parent-r2",
+      "uid": "b1cb5cc0-5acc-4c1f-8657-1703688f5883",
+      "tenant": "tenant-alpha",
+      "subAgents": 1,
+      "compute": {"lastLease": "2026-10-18T16:28:12Z"}
+    },
+    {
+      "atespace": "otel-bench",
+      "name": "ax-child-r2",
+      "uid": "e946925b-9f51-4ef4-b9d8-18fd0d9ca8a1",
+      "tenant": "tenant-alpha",
+      "parentAgentId": "otel-bench/ax-parent-r2"
+    }
+  ]
+}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, srv.Client())
+	ctx := context.Background()
+
+	oldParent, err := c.GetActorCost(ctx, "otel-bench", true, "e32d3de1")
+	if err != nil {
+		t.Fatalf("old parent lookup failed: %v", err)
+	}
+	if len(oldParent.Children) != 0 {
+		t.Errorf("old superseded parent got %d children (%+v), want 0", len(oldParent.Children), oldParent.Children)
+	}
+
+	newParent, err := c.GetActorCost(ctx, "otel-bench", true, "b1cb5cc0")
+	if err != nil {
+		t.Fatalf("new parent lookup failed: %v", err)
+	}
+	if len(newParent.Children) != 1 || newParent.Children[0].UID != "e946925b-9f51-4ef4-b9d8-18fd0d9ca8a1" {
+		t.Errorf("new canonical parent got children %+v, want [e946925b]", newParent.Children)
+	}
+}
