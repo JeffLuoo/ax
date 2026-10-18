@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/lock"
 	"github.com/google/ax/internal/store"
 	"github.com/google/ax/internal/substrate"
@@ -42,6 +43,9 @@ type Reconciler interface {
 type Options struct {
 	Locker     lock.Locker
 	Reconciler Reconciler
+	// Events receives a task lifecycle event for every create, phase change,
+	// delete, and outcome. Nil sends nothing.
+	Events events.Emitter
 }
 
 // Server provides the gRPC API for AX.
@@ -50,6 +54,7 @@ type Server struct {
 	store      store.Store
 	locker     lock.Locker
 	reconciler Reconciler
+	events     events.Emitter
 	grpcServer *grpc.Server
 }
 
@@ -64,10 +69,16 @@ func NewServer(s store.Store, opts ...Options) *Server {
 		locker = lock.NewMemoryLocker()
 	}
 
+	emitter := opt.Events
+	if emitter == nil {
+		emitter = events.Nop{}
+	}
+
 	srv := &Server{
 		store:      s,
 		locker:     locker,
 		reconciler: opt.Reconciler,
+		events:     emitter,
 		grpcServer: grpc.NewServer(),
 	}
 	v1alpha1.RegisterAXServer(srv.grpcServer, srv)
@@ -214,6 +225,7 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 				task.Status.Phase = "Failed"
 			}
 			_ = s.store.UpdateTaskStatus(ctx, atespace, taskName, task.Status)
+			s.events.TaskChanged(ctx, task)
 			if substrate.IsTransientError(err) {
 				return nil, status.Errorf(codes.Unavailable, "provisioning task on substrate: %v", err)
 			}
@@ -225,6 +237,7 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 		}
 	}
 
+	s.events.TaskChanged(ctx, task)
 	return task, nil
 }
 
@@ -261,6 +274,7 @@ func (s *Server) DeleteTask(ctx context.Context, req *v1alpha1.DeleteTaskRequest
 	if err := s.store.UpdateTaskStatus(ctx, atespace, taskName, task.Status); err != nil {
 		return nil, status.Errorf(codes.Internal, "updating task status: %v", err)
 	}
+	s.events.TaskChanged(ctx, task)
 
 	// Directly clean up Substrate actor and templates
 	if s.reconciler != nil {
@@ -281,6 +295,9 @@ func (s *Server) DeleteTask(ctx context.Context, req *v1alpha1.DeleteTaskRequest
 	if err := s.store.DeleteTask(ctx, atespace, taskName); err != nil {
 		return nil, status.Errorf(codes.Internal, "deleting task record: %v", err)
 	}
+	deleted := proto.Clone(task).(*v1alpha1.Task)
+	deleted.Status.Phase = events.PhaseDeleted
+	s.events.TaskChanged(ctx, deleted)
 	return &v1alpha1.DeleteTaskResponse{}, nil
 }
 
@@ -332,6 +349,7 @@ func (s *Server) SuspendTask(ctx context.Context, req *v1alpha1.SuspendTaskReque
 		}
 	}
 
+	s.events.TaskChanged(ctx, task)
 	return task, nil
 }
 
@@ -377,6 +395,7 @@ func (s *Server) ResumeTask(ctx context.Context, req *v1alpha1.ResumeTaskRequest
 				task.Status.Phase = "Failed"
 			}
 			_ = s.store.UpdateTaskStatus(ctx, atespace, taskName, task.Status)
+			s.events.TaskChanged(ctx, task)
 			if substrate.IsTransientError(err) {
 				return nil, status.Errorf(codes.Unavailable, "resuming task on substrate: %v", err)
 			}
@@ -392,6 +411,7 @@ func (s *Server) ResumeTask(ctx context.Context, req *v1alpha1.ResumeTaskRequest
 		}
 	}
 
+	s.events.TaskChanged(ctx, task)
 	return task, nil
 }
 

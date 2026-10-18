@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/google/ax/internal/controller"
+	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/lock"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store/redis"
@@ -119,9 +120,20 @@ func main() {
 		reconciler = tr
 	}
 
+	// Task events for Agent FinOps go out only when an OTLP endpoint is set
+	// (OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_LOGS_ENDPOINT).
+	emitter, err := events.NewFromEnv(context.Background())
+	if err != nil {
+		slog.Warn("could not initialize the task event exporter; sending no task events", "error", err)
+		emitter = events.Nop{}
+	} else if events.Enabled() {
+		slog.Info("sending task events over OTLP", "event", events.EventName)
+	}
+
 	srv := server.NewServer(rStore, server.Options{
 		Locker:     rLocker,
 		Reconciler: reconciler,
+		Events:     emitter,
 	})
 
 	httpServer := &http.Server{
@@ -148,4 +160,7 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	if err := emitter.Shutdown(shutdownCtx); err != nil {
+		slog.Warn("flushing task events", "error", err)
+	}
 }

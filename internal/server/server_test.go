@@ -20,9 +20,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store"
 	"github.com/google/ax/internal/store/memory"
@@ -831,5 +834,75 @@ func TestCreateTask_ParentRules(t *testing.T) {
 	}})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("negative budget: got %v, want InvalidArgument", err)
+	}
+}
+
+// recordingEmitter keeps the task events the server sends.
+type recordingEmitter struct {
+	mu     sync.Mutex
+	events []*v1alpha1.Task
+}
+
+func (r *recordingEmitter) TaskChanged(_ context.Context, task *v1alpha1.Task) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, proto.Clone(task).(*v1alpha1.Task))
+}
+
+func (r *recordingEmitter) Shutdown(context.Context) error { return nil }
+
+func (r *recordingEmitter) phases() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, t := range r.events {
+		out = append(out, t.GetStatus().GetPhase())
+	}
+	return out
+}
+
+func TestServer_EmitsTaskEvents(t *testing.T) {
+	rec := &recordingEmitter{}
+	srv := server.NewServer(memory.NewStore(), server.Options{Reconciler: &fakeReconciler{}, Events: rec})
+	ctx := context.Background()
+
+	if _, err := srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "root", Atespace: "team-a"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "child", Atespace: "team-a"},
+		Spec:     &v1alpha1.TaskSpec{Parent: "root", Budget: &v1alpha1.Budget{MaxUsd: 3}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.ResumeTask(ctx, &v1alpha1.ResumeTaskRequest{Atespace: "team-a", Name: "child"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.SuspendTask(ctx, &v1alpha1.SuspendTaskRequest{Atespace: "team-a", Name: "child"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.DeleteTask(ctx, &v1alpha1.DeleteTaskRequest{Atespace: "team-a", Name: "child"}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"Suspended", "Suspended", "Running", "Suspended", v1alpha1.PhaseTerminating, events.PhaseDeleted}
+	got := rec.phases()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("event phases = %v, want %v", got, want)
+	}
+	child := rec.events[1]
+	if child.GetMetadata().GetName() != "child" || child.GetSpec().GetParent() != "root" || child.GetSpec().GetBudget().GetMaxUsd() != 3 {
+		t.Errorf("create event for child = %v", child)
+	}
+	// A rejected create sends nothing.
+	n := len(rec.events)
+	_, _ = srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "orphan", Atespace: "team-a"},
+		Spec:     &v1alpha1.TaskSpec{Parent: "missing"},
+	}})
+	if len(rec.events) != n {
+		t.Errorf("a rejected create sent an event")
 	}
 }
