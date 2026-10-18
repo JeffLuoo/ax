@@ -2,10 +2,10 @@
   "originCharge": {
     "OriginChargeId": "charge-pool-all-ate-workers/default",
     "BillingCurrency": "USD",
-    "BillingPeriodStart": "2026-10-18T12:49:11Z",
-    "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
-    "ChargePeriodStart": "2026-10-18T12:49:11Z",
-    "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+    "BillingPeriodStart": "2026-10-18T12:55:19Z",
+    "BillingPeriodEnd": "2026-10-18T10:55:20.33294-04:00",
+    "ChargePeriodStart": "2026-10-18T12:55:19Z",
+    "ChargePeriodEnd": "2026-10-18T10:55:20.33294-04:00",
     "ChargeCategory": "Usage",
     "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
     "ServiceProviderName": "Google Cloud",
@@ -16,12 +16,12 @@
     "ResourceName": "ate-workers/default",
     "ResourceType": "WorkerPool",
     "PricingUnit": "Hours",
-    "PricingQuantity": 2.000324998888889,
+    "PricingQuantity": 2.000370261111111,
     "ConsumedUnit": "Hours",
-    "ConsumedQuantity": 2.000324998888889,
-    "ListCost": 0.1396355656,
-    "ContractedCost": 0.1396355656,
-    "EffectiveCost": 0.1396355656,
+    "ConsumedQuantity": 2.000370261111111,
+    "ListCost": 0.1396382736,
+    "ContractedCost": 0.1396382736,
+    "EffectiveCost": 0.1396382736,
     "BilledCost": 0,
     "Tags": {
       "finops.agent-substrate.dev/estimated": "true",
@@ -34,10 +34,10 @@
     {
       "OriginChargeId": "charge-pool-all-ate-workers/default",
       "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-18T12:49:11Z",
-      "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "BillingPeriodStart": "2026-10-18T12:55:19Z",
+      "BillingPeriodEnd": "2026-10-18T10:55:20.33294-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.33294-04:00",
       "ChargeCategory": "Usage",
       "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
       "ServiceProviderName": "Google Cloud",
@@ -48,12 +48,12 @@
       "ResourceName": "ate-workers/default",
       "ResourceType": "WorkerPool",
       "PricingUnit": "Hours",
-      "PricingQuantity": 2.000324998888889,
+      "PricingQuantity": 2.000370261111111,
       "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 2.000324998888889,
-      "ListCost": 0.1396355656,
-      "ContractedCost": 0.1396355656,
-      "EffectiveCost": 0.1396355656,
+      "ConsumedQuantity": 2.000370261111111,
+      "ListCost": 0.1396382736,
+      "ContractedCost": 0.1396382736,
+      "EffectiveCost": 0.1396382736,
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true",
@@ -67,10 +67,10 @@
     {
       "OriginChargeId": "charge-pool-all-ate-workers/default",
       "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-18T12:49:11Z",
-      "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "BillingPeriodStart": "2026-10-18T12:55:19Z",
+      "BillingPeriodEnd": "2026-10-18T10:55:20.33294-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.33294-04:00",
       "ChargeCategory": "Usage",
       "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
       "ServiceProviderName": "Google Cloud",
@@ -81,12 +81,12 @@
       "ResourceName": "ate-workers/default",
       "ResourceType": "WorkerPool",
       "PricingUnit": "Hours",
-      "PricingQuantity": 0.7658275475,
+      "PricingQuantity": 0.7658560161,
       "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.7658275475,
-      "ListCost": 0.0534596942,
-      "ContractedCost": 0.0534596942,
-      "EffectiveCost": 0.053459694200000005,
+      "ConsumedQuantity": 0.7658560161,
+      "ListCost": 0.0534615086,
+      "ContractedCost": 0.0534615086,
+      "EffectiveCost": 0.0534615086,
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true",
@@ -98,15 +98,15 @@
       "AllocatedMethodDetails": {
         "Elements": [
           {
-            "AllocatedRatio": 0.3019164445594511,
-            "UsageQuantity": 1.3336583322222222,
+            "AllocatedRatio": 0.3019208359791696,
+            "UsageQuantity": 1.3337035944444444,
             "UsageUnit": "vCPU-Hours",
             "x_Method": "booked-share",
             "x_PricePerUnit": 0.031611
           },
           {
-            "AllocatedRatio": 0.08093511600313953,
-            "UsageQuantity": 2.6673166644444444,
+            "AllocatedRatio": 0.08093629352919757,
+            "UsageQuantity": 2.667407188888889,
             "UsageUnit": "GiB-Hours",
             "x_Method": "booked-share",
             "x_PricePerUnit": 0.004237
@@ -130,10 +130,10 @@
     {
       "OriginChargeId": "charge-pool-all-ate-workers/default",
       "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-18T12:49:11Z",
-      "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "BillingPeriodStart": "2026-10-18T12:55:19Z",
+      "BillingPeriodEnd": "2026-10-18T10:55:20.33294-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.33294-04:00",
       "ChargeCategory": "Usage",
       "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
       "ServiceProviderName": "Google Cloud",
@@ -144,9 +144,9 @@
       "ResourceName": "ate-workers/default",
       "ResourceType": "WorkerPool",
       "PricingUnit": "Hours",
-      "PricingQuantity": 0.5743902011,
+      "PricingQuantity": 0.5743920586,
       "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.5743902011,
+      "ConsumedQuantity": 0.5743920586,
       "ListCost": 0.0400961347,
       "ContractedCost": 0.0400961347,
       "EffectiveCost": 0.040096134699999994,
@@ -161,14 +161,14 @@
       "AllocatedMethodDetails": {
         "Elements": [
           {
-            "AllocatedRatio": 0.226445036865307,
+            "AllocatedRatio": 0.2264406454248801,
             "UsageQuantity": 1.0002777777777778,
             "UsageUnit": "vCPU-Hours",
             "x_Method": "booked-share",
             "x_PricePerUnit": 0.031611
           },
           {
-            "AllocatedRatio": 0.06070340219970434,
+            "AllocatedRatio": 0.06070222498081644,
             "UsageQuantity": 2.0005555555555556,
             "UsageUnit": "GiB-Hours",
             "x_Method": "booked-share",
@@ -192,10 +192,10 @@
     {
       "OriginChargeId": "charge-pool-all-ate-workers/default",
       "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-18T12:49:11Z",
-      "BillingPeriodEnd": "2026-10-18T10:49:12.169996-04:00",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "BillingPeriodStart": "2026-10-18T12:55:19Z",
+      "BillingPeriodEnd": "2026-10-18T10:55:20.33294-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.33294-04:00",
       "ChargeCategory": "Usage",
       "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
       "ServiceProviderName": "Google Cloud",
@@ -206,12 +206,12 @@
       "ResourceName": "ate-workers/default",
       "ResourceType": "WorkerPool",
       "PricingUnit": "Hours",
-      "PricingQuantity": 0.6601072502888888,
+      "PricingQuantity": 0.6601221864111113,
       "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.6601072502888888,
-      "ListCost": 0.04607973670000002,
-      "ContractedCost": 0.04607973670000002,
-      "EffectiveCost": 0.04607973670000001,
+      "ConsumedQuantity": 0.6601221864111113,
+      "ListCost": 0.0460806303,
+      "ContractedCost": 0.0460806303,
+      "EffectiveCost": 0.04608063030000001,
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true",
@@ -223,7 +223,7 @@
       "AllocatedMethodDetails": {
         "Elements": [
           {
-            "AllocatedRatio": 0.330000000372398,
+            "AllocatedRatio": 0.3300000000859364,
             "x_UnusedCapacityResourceId": "_unused_capacity"
           }
         ]
@@ -238,8 +238,8 @@
       "BillingCurrency": "USD",
       "BillingPeriodStart": "0001-01-01T00:00:00Z",
       "BillingPeriodEnd": "0001-01-01T00:00:00Z",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.33294-04:00",
       "ChargeCategory": "Usage",
       "ServiceName": "Cloud Storage",
       "ServiceCategory": "Storage",
@@ -249,9 +249,9 @@
       "PricingQuantity": 3,
       "ConsumedUnit": "GiB-Months",
       "ConsumedQuantity": 3,
-      "ListCost": 0.0001096158,
-      "ContractedCost": 0.0001096158,
-      "EffectiveCost": 0.0001096158,
+      "ListCost": 0.0001096195,
+      "ContractedCost": 0.0001096195,
+      "EffectiveCost": 0.0001096195,
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true"
@@ -260,7 +260,7 @@
       "AllocatedMethodDetails": {
         "Elements": [
           {
-            "AllocatedRatio": 0.5714202366836983,
+            "AllocatedRatio": 0.571428547598455,
             "UsageQuantity": 3,
             "UsageUnit": "GiB-Months"
           }
@@ -283,8 +283,8 @@
       "BillingCurrency": "USD",
       "BillingPeriodStart": "0001-01-01T00:00:00Z",
       "BillingPeriodEnd": "0001-01-01T00:00:00Z",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.33294-04:00",
       "ChargeCategory": "Usage",
       "ServiceName": "Cloud Storage",
       "ServiceCategory": "Storage",
@@ -305,7 +305,7 @@
       "AllocatedMethodDetails": {
         "Elements": [
           {
-            "AllocatedRatio": 0.4285797633163017,
+            "AllocatedRatio": 0.4285714524015451,
             "UsageQuantity": 3,
             "UsageUnit": "GiB-Months"
           }
@@ -326,12 +326,12 @@
   "reconciliation": {
     "resourceId": "gke-worker-pools/all",
     "pool": "all",
-    "periodStart": "2026-10-18T12:49:11Z",
-    "periodEnd": "2026-10-18T10:49:12.169996-04:00",
+    "periodStart": "2026-10-18T12:55:19Z",
+    "periodEnd": "2026-10-18T10:55:20.33294-04:00",
     "estimated": true,
-    "originCost": 0.1396355656,
-    "allocated": 0.0935558289,
-    "unallocated": 0.0460797367,
+    "originCost": 0.1396382736,
+    "allocated": 0.0935576433,
+    "unallocated": 0.0460806303,
     "agents": 2,
     "unsizedLeases": 0,
     "estimatedLeases": 0,
@@ -341,12 +341,12 @@
     {
       "resourceId": "gke-worker-pool/all/ate-workers/default",
       "pool": "ate-workers/default",
-      "periodStart": "2026-10-18T12:49:11Z",
-      "periodEnd": "2026-10-18T10:49:12.169996-04:00",
+      "periodStart": "2026-10-18T12:55:19Z",
+      "periodEnd": "2026-10-18T10:55:20.33294-04:00",
       "estimated": true,
-      "originCost": 0.1396355656,
-      "allocated": 0.0935558289,
-      "unallocated": 0.0460797367,
+      "originCost": 0.1396382736,
+      "allocated": 0.0935576433,
+      "unallocated": 0.0460806303,
       "agents": 2,
       "unsizedLeases": 0,
       "estimatedLeases": 0,

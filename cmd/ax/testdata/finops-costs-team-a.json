@@ -1,7 +1,7 @@
 {
   "costBasis": "estimated",
-  "since": "2026-10-18T10:49:07.639445-04:00",
-  "generatedAt": "2026-10-18T10:49:12.129898-04:00",
+  "since": "2026-10-18T10:55:18.078691-04:00",
+  "generatedAt": "2026-10-18T10:55:20.292487-04:00",
   "atespace": "team-a",
   "totals": {
     "calls": 0,
@@ -12,31 +12,32 @@
     "reasoningOutputTokens": 0,
     "cost": {},
     "unpricedCalls": 0,
+    "unknownCostCalls": 0,
     "usageStatus": {},
     "lastCall": "0001-01-01T00:00:00Z"
   },
   "compute": {
     "leases": 2,
     "openLeases": 1,
-    "leaseSeconds": 8402.129898,
-    "vcpuSeconds": 8402.129898,
-    "gibSeconds": 16804.259796,
+    "leaseSeconds": 8402.292486999999,
+    "vcpuSeconds": 8402.292486999999,
+    "gibSeconds": 16804.584973999998,
     "cost": {
-      "USD": 0.093555382489
+      "USD": 0.093557192872
     },
     "measuredCost": {
-      "USD": 0.056582370103
+      "USD": 0.056584180486
     },
     "measuredFallbackLeases": 1,
     "unpricedLeases": 0,
     "measuredCpuSeconds": 120,
-    "lastLease": "2026-10-18T14:49:12.129898Z"
+    "lastLease": "2026-10-18T14:55:20.292487Z"
   },
   "totalCost": {
-    "USD": 0.093555382489
+    "USD": 0.093557192872
   },
   "fullyLoadedCost": {
-    "USD": 0.139826728687
+    "USD": 0.139829434463
   },
   "actors": [
     {
@@ -56,64 +57,65 @@
       "reasoningOutputTokens": 0,
       "cost": {},
       "unpricedCalls": 0,
+      "unknownCostCalls": 0,
       "usageStatus": {},
       "lastCall": "0001-01-01T00:00:00Z",
       "compute": {
         "leases": 1,
         "openLeases": 1,
-        "leaseSeconds": 4801.129898,
-        "vcpuSeconds": 4801.129898,
-        "gibSeconds": 9602.259796,
+        "leaseSeconds": 4801.292487,
+        "vcpuSeconds": 4801.292487,
+        "gibSeconds": 9602.584974,
         "cost": {
-          "USD": 0.053459247767
+          "USD": 0.05346105815
         },
         "measuredCost": {
-          "USD": 0.053459247767
+          "USD": 0.05346105815
         },
         "measuredFallbackLeases": 1,
         "unpricedLeases": 0,
         "measuredCpuSeconds": 0,
-        "lastLease": "2026-10-18T14:49:12.129898Z"
+        "lastLease": "2026-10-18T14:55:20.292487Z"
       },
       "totalCost": {
-        "USD": 0.053459247767
+        "USD": 0.05346105815
       },
       "measuredComputeCost": {
-        "USD": 0.053459247767
+        "USD": 0.05346105815
       },
       "idleShareCost": {
-        "USD": 0.026330674273
+        "USD": 0.026331565954
       },
       "storageCost": {
-        "USD": 0.000109614838
+        "USD": 0.00010961855
       },
       "hostingCost": {
-        "USD": 0.079899536878
+        "USD": 0.079902242654
       },
       "measuredHostingCost": {
-        "USD": 0.079899536878
+        "USD": 0.079902242654
       },
       "fullyLoadedCost": {
-        "USD": 0.079899536878
+        "USD": 0.079902242654
       },
       "measuredFullyLoadedCost": {
-        "USD": 0.079899536878
+        "USD": 0.079902242654
       },
       "treeComputeCost": {
-        "USD": 0.053459247767
+        "USD": 0.05346105815
       },
       "treeTotalCost": {
-        "USD": 0.053459247767
+        "USD": 0.05346105815
       },
       "treeFullyLoadedCost": {
-        "USD": 0.079899536878
+        "USD": 0.079902242654
       },
       "task": {
         "name": "child",
         "parent": "root",
         "budgetUsd": 0.01,
-        "spendUsd": 0.053459247767,
-        "treeSpendUsd": 0.053459247767,
+        "spendUsd": 0.05346105815,
+        "treeSpendUsd": 0.05346105815,
         "overBudget": true,
         "treeOverBudget": true,
         "outcome": "Failed",
@@ -138,6 +140,7 @@
       "reasoningOutputTokens": 0,
       "cost": {},
       "unpricedCalls": 0,
+      "unknownCostCalls": 0,
       "usageStatus": {},
       "lastCall": "0001-01-01T00:00:00Z",
       "compute": {
@@ -155,7 +158,7 @@
         "measuredFallbackLeases": 0,
         "unpricedLeases": 0,
         "measuredCpuSeconds": 120,
-        "lastLease": "2026-10-18T13:49:12Z"
+        "lastLease": "2026-10-18T13:55:20Z"
       },
       "totalCost": {
         "USD": 0.040096134722
@@ -182,19 +185,19 @@
         "USD": 0.022954179423
       },
       "treeComputeCost": {
-        "USD": 0.093555382489
+        "USD": 0.093557192872
       },
       "treeTotalCost": {
-        "USD": 0.093555382489
+        "USD": 0.093557192872
       },
       "treeFullyLoadedCost": {
-        "USD": 0.139826728687
+        "USD": 0.139829434463
       },
       "task": {
         "name": "root",
         "budgetUsd": 5,
         "spendUsd": 0.040096134722,
-        "treeSpendUsd": 0.093555382489,
+        "treeSpendUsd": 0.093557192872,
         "overBudget": false,
         "treeOverBudget": false,
         "outcome": "Completed",
@@ -212,28 +215,28 @@
       "compute": {
         "leases": 2,
         "openLeases": 1,
-        "leaseSeconds": 8402.129898,
-        "vcpuSeconds": 8402.129898,
-        "gibSeconds": 16804.259796,
+        "leaseSeconds": 8402.292486999999,
+        "vcpuSeconds": 8402.292486999999,
+        "gibSeconds": 16804.584973999998,
         "cost": {
-          "USD": 0.093555382489
+          "USD": 0.093557192872
         },
         "measuredCost": {
-          "USD": 0.056582370103
+          "USD": 0.056584180486
         },
         "measuredFallbackLeases": 1,
         "unpricedLeases": 0,
         "measuredCpuSeconds": 120,
-        "lastLease": "2026-10-18T14:49:12.129898Z"
+        "lastLease": "2026-10-18T14:55:20.292487Z"
       },
       "totalCost": {
-        "USD": 0.093555382489
+        "USD": 0.093557192872
       }
     }
   ],
   "sessions": [
     {
-      "sessionId": "uid-child-0000001#epoch:uid-child-0000001/1792330151000000000",
+      "sessionId": "uid-child-0000001#epoch:uid-child-0000001/1792330519000000000",
       "fromHeader": false,
       "atespace": "team-a",
       "actor": "team-a/child",
@@ -241,24 +244,24 @@
       "calls": 0,
       "inputTokens": 0,
       "outputTokens": 0,
-      "activeSeconds": 4801.129898,
+      "activeSeconds": 4801.292487,
       "activeShare": 1,
       "llmCost": {},
       "computeCost": {
-        "USD": 0.053459247767
+        "USD": 0.05346105815
       },
       "totalCost": {
-        "USD": 0.053459247767
+        "USD": 0.05346105815
       },
-      "lastActivity": "2026-10-18T14:49:12.129898Z"
+      "lastActivity": "2026-10-18T14:55:20.292487Z"
     },
     {
-      "sessionId": "uid-root-00000001#epoch:1792327751000000000",
+      "sessionId": "uid-root-00000001#epoch:1792328119000000000",
       "fromHeader": false,
       "atespace": "team-a",
       "actor": "team-a/root",
       "actorUid": "uid-root-00000001",
-      "epoch": "1792327751000000000",
+      "epoch": "1792328119000000000",
       "calls": 0,
       "inputTokens": 0,
       "outputTokens": 0,
@@ -271,7 +274,7 @@
       "totalCost": {
         "USD": 0.040096134722
       },
-      "lastActivity": "2026-10-18T13:49:12Z"
+      "lastActivity": "2026-10-18T13:55:20Z"
     }
   ],
   "curve": [
@@ -661,10 +664,10 @@
     {
       "OriginChargeId": "charge-pool-team-a-ate-workers/default",
       "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-18T12:49:11Z",
-      "BillingPeriodEnd": "2026-10-18T10:49:12.129898-04:00",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "BillingPeriodStart": "2026-10-18T12:55:19Z",
+      "BillingPeriodEnd": "2026-10-18T10:55:20.292487-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.292487-04:00",
       "ChargeCategory": "Usage",
       "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
       "ServiceProviderName": "Google Cloud",
@@ -675,12 +678,12 @@
       "ResourceName": "ate-workers/default",
       "ResourceType": "WorkerPool",
       "PricingUnit": "Hours",
-      "PricingQuantity": 0.7658205417,
+      "PricingQuantity": 0.7658489477,
       "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.7658205417,
-      "ListCost": 0.0534592477,
-      "ContractedCost": 0.0534592477,
-      "EffectiveCost": 0.0534592477,
+      "ConsumedQuantity": 0.7658489477,
+      "ListCost": 0.0534610581,
+      "ContractedCost": 0.0534610581,
+      "EffectiveCost": 0.0534610581,
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true",
@@ -692,15 +695,15 @@
       "AllocatedMethodDetails": {
         "Elements": [
           {
-            "AllocatedRatio": 0.3019153638634202,
-            "UsageQuantity": 1.333647193888889,
+            "AllocatedRatio": 0.3019197458815128,
+            "UsageQuantity": 1.3336923575,
             "UsageUnit": "vCPU-Hours",
             "x_Method": "booked-share",
             "x_PricePerUnit": 0.031611
           },
           {
-            "AllocatedRatio": 0.08093482621284408,
-            "UsageQuantity": 2.667294387777778,
+            "AllocatedRatio": 0.08093600072461285,
+            "UsageQuantity": 2.667384715,
             "UsageUnit": "GiB-Hours",
             "x_Method": "booked-share",
             "x_PricePerUnit": 0.004237
@@ -724,10 +727,10 @@
     {
       "OriginChargeId": "charge-pool-team-a-ate-workers/default",
       "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-18T12:49:11Z",
-      "BillingPeriodEnd": "2026-10-18T10:49:12.129898-04:00",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "BillingPeriodStart": "2026-10-18T12:55:19Z",
+      "BillingPeriodEnd": "2026-10-18T10:55:20.292487-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.292487-04:00",
       "ChargeCategory": "Usage",
       "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
       "ServiceProviderName": "Google Cloud",
@@ -738,9 +741,9 @@
       "ResourceName": "ate-workers/default",
       "ResourceType": "WorkerPool",
       "PricingUnit": "Hours",
-      "PricingQuantity": 0.5743897439,
+      "PricingQuantity": 0.5743915975,
       "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.5743897439,
+      "ConsumedQuantity": 0.5743915975,
       "ListCost": 0.0400961347,
       "ContractedCost": 0.0400961347,
       "EffectiveCost": 0.040096134699999994,
@@ -755,14 +758,14 @@
       "AllocatedMethodDetails": {
         "Elements": [
           {
-            "AllocatedRatio": 0.22644611756199126,
+            "AllocatedRatio": 0.22644173564731662,
             "UsageQuantity": 1.0002777777777778,
             "UsageUnit": "vCPU-Hours",
             "x_Method": "booked-share",
             "x_PricePerUnit": 0.031611
           },
           {
-            "AllocatedRatio": 0.06070369190340634,
+            "AllocatedRatio": 0.060702517238098684,
             "UsageQuantity": 2.0005555555555556,
             "UsageUnit": "GiB-Hours",
             "x_Method": "booked-share",
@@ -786,10 +789,10 @@
     {
       "OriginChargeId": "charge-pool-team-a-ate-workers/default",
       "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-18T12:49:11Z",
-      "BillingPeriodEnd": "2026-10-18T10:49:12.129898-04:00",
-      "ChargePeriodStart": "2026-10-18T12:49:11Z",
-      "ChargePeriodEnd": "2026-10-18T10:49:12.129898-04:00",
+      "BillingPeriodStart": "2026-10-18T12:55:19Z",
+      "BillingPeriodEnd": "2026-10-18T10:55:20.292487-04:00",
+      "ChargePeriodStart": "2026-10-18T12:55:19Z",
+      "ChargePeriodEnd": "2026-10-18T10:55:20.292487-04:00",
       "ChargeCategory": "Usage",
       "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
       "ServiceProviderName": "Google Cloud",
@@ -800,12 +803,12 @@
       "ResourceName": "ate-workers/default",
       "ResourceType": "WorkerPool",
       "PricingUnit": "Hours",
-      "PricingQuantity": 0.6601035749555554,
+      "PricingQuantity": 0.660118478966667,
       "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.6601035749555554,
-      "ListCost": 0.046079516800000005,
-      "ContractedCost": 0.046079516800000005,
-      "EffectiveCost": 0.04607951680000001,
+      "ConsumedQuantity": 0.660118478966667,
+      "ListCost": 0.046080408499999996,
+      "ContractedCost": 0.046080408499999996,
+      "EffectiveCost": 0.0460804085,
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true",
@@ -817,7 +820,7 @@
       "AllocatedMethodDetails": {
         "Elements": [
           {
-            "AllocatedRatio": 0.3300000004583382,
+            "AllocatedRatio": 0.33000000050845907,
             "x_UnusedCapacityResourceId": "_unused_capacity"
           }
         ]
@@ -829,12 +832,12 @@
   "focusReconciliation": {
     "resourceId": "gke-worker-pools/team-a",
     "pool": "all",
-    "periodStart": "2026-10-18T12:49:11Z",
-    "periodEnd": "2026-10-18T10:49:12.129898-04:00",
+    "periodStart": "2026-10-18T12:55:19Z",
+    "periodEnd": "2026-10-18T10:55:20.292487-04:00",
     "estimated": true,
-    "originCost": 0.1396348992,
-    "allocated": 0.0935553824,
-    "unallocated": 0.0460795168,
+    "originCost": 0.1396376013,
+    "allocated": 0.0935571928,
+    "unallocated": 0.0460804085,
     "agents": 2,
     "unsizedLeases": 0,
     "estimatedLeases": 0,
@@ -855,10 +858,10 @@
       "tasks": 1,
       "actors": 1,
       "totalCost": {
-        "USD": 0.053459247767
+        "USD": 0.05346105815
       },
       "fullyLoadedCost": {
-        "USD": 0.079899536878
+        "USD": 0.079902242654
       }
     },
     "unfinished": {
