@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,7 +42,21 @@ const (
 	// PhaseTerminating marks a task whose deletion has been requested and whose
 	// actor is being torn down. The record disappears once cleanup completes.
 	PhaseTerminating = "Terminating"
+
+	// OutcomeCompleted and OutcomeFailed are the values of status.outcome after
+	// the task command exits: with status 0, or with any other status.
+	OutcomeCompleted = "Completed"
+	OutcomeFailed    = "Failed"
 )
+
+// OutcomeForExitCode returns the status.outcome for a task command that exited
+// with code.
+func OutcomeForExitCode(code int32) string {
+	if code == 0 {
+		return OutcomeCompleted
+	}
+	return OutcomeFailed
+}
 
 // YAML encoding.
 //
@@ -305,8 +320,45 @@ func ValidateModel(m *Model) error {
 	return ValidateObjectMeta(m.GetMetadata())
 }
 
+// quantityRegexp matches the Kubernetes resource quantities that Agent
+// Substrate accepts for a sandbox's cpu and memory limits, for example "500m",
+// "2", or "2Gi".
+var quantityRegexp = regexp.MustCompile(`^([0-9]+(\.[0-9]*)?|\.[0-9]+)(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$`)
+
+// ValidateQuantity reports whether s is a positive resource quantity.
+func ValidateQuantity(s string) error {
+	if !quantityRegexp.MatchString(s) {
+		return errors.New("must be a resource quantity such as \"500m\", \"2\", or \"2Gi\"")
+	}
+	if strings.Trim(strings.TrimRight(s, "mkMGTPEi"), "0.") == "" {
+		return errors.New("must be greater than zero")
+	}
+	return nil
+}
+
+// validateResources checks the cpu and memory quantities that are set.
+func validateResources(r *ResourcesSpec) error {
+	for _, l := range []struct {
+		field string
+		list  *ResourceList
+	}{{"spec.resources.requests", r.GetRequests()}, {"spec.resources.limits", r.GetLimits()}} {
+		if cpu := l.list.GetCpu(); cpu != "" {
+			if err := ValidateQuantity(cpu); err != nil {
+				return fmt.Errorf("%s.cpu: invalid value %q: %w", l.field, cpu, err)
+			}
+		}
+		if mem := l.list.GetMemory(); mem != "" {
+			if err := ValidateQuantity(mem); err != nil {
+				return fmt.Errorf("%s.memory: invalid value %q: %w", l.field, mem, err)
+			}
+		}
+	}
+	return nil
+}
+
 // ValidateTask reports the first problem with a task that would make it
 // impossible to run correctly. It is called by the API server before saving.
+// It does not check that a parent task exists; the API server does.
 func ValidateTask(t *Task) error {
 	if err := ValidateObjectMeta(t.GetMetadata()); err != nil {
 		return err
@@ -314,6 +366,20 @@ func ValidateTask(t *Task) error {
 	spec := t.GetSpec()
 	if spec == nil {
 		return nil
+	}
+	if parent := spec.GetParent(); parent != "" {
+		if err := ValidateName(parent); err != nil {
+			return fmt.Errorf("spec.parent: invalid value %q: %w", parent, err)
+		}
+		if parent == t.GetMetadata().GetName() {
+			return fmt.Errorf("spec.parent: a task cannot be its own parent")
+		}
+	}
+	if b := spec.GetBudget().GetMaxUsd(); math.IsNaN(b) || math.IsInf(b, 0) || b < 0 {
+		return fmt.Errorf("spec.budget.maxUsd: invalid value %v: must be a finite number of at least 0", b)
+	}
+	if err := validateResources(spec.GetResources()); err != nil {
+		return err
 	}
 	refs := spec.WorkspaceRefs()
 	paths := spec.WorkspacePaths()

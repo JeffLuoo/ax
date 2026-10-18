@@ -19,6 +19,12 @@ The unit is deliberately small. An agent is not one process that runs to complet
 
 Two transitions are worth knowing. Suspending a task sets `Ready` to False with reason `TaskSuspended`; resuming sets it back. Deleting a task tears down the sandbox on Agent Substrate and removes the record. `ax delete` blocks until that has completed.
 
+When the task command exits, the runner records the exit status on the durable volume and serves it at `GET /statusz`. `ax-server` reads it through the atenet router for each running task that has no outcome, and sets `status.outcome` to `Completed` or `Failed`, with `status.exitCode` and `status.finishedAt`. The runner does not start the command again after a resume, so a command that completed does not run a second time. The outcome comes from inside the sandbox, so treat it as what the agent reports.
+
+### Task tree and budget
+
+`spec.parent` names the task that started this task, and it must be in the same atespace. The parent links make a task tree, which Agent FinOps uses to add the cost of each sub-task to the cost of its parent. `spec.budget.maxUsd` is the spending limit that the task declares. `ax-server` sends the parent, the budget, the phase, and the outcome to Agent FinOps as `ax.task.state_changed` events when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+
 ## Workspace
 
 Getting an agent to the point where it can start working is tedious. Before the first useful action it needs its data sources in place, such as repositories cloned at the right revision or buckets mounted, the tools it is allowed to call, and the skills it should bring along. Every task that needs the same environment repeats that setup, and every agent framework reinvents it. A `Workspace` exists to make that work declarative and done once.

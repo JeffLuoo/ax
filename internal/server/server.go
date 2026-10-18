@@ -173,6 +173,21 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 		return nil, status.Errorf(codes.Internal, "checking existing task: %v", err)
 	}
 
+	// A parent is always in the task's own atespace, so a task tree never
+	// crosses an atespace and cost rollups cannot move cost to another tenant.
+	if parent := task.GetSpec().GetParent(); parent != "" {
+		p, err := s.store.GetTask(ctx, atespace, parent)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Errorf(codes.FailedPrecondition, "parent task %q not found in atespace %q", parent, atespace)
+		}
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "checking parent task: %v", err)
+		}
+		if p.GetStatus().GetPhase() == v1alpha1.PhaseTerminating {
+			return nil, status.Errorf(codes.FailedPrecondition, "parent task %s/%s is being deleted", atespace, parent)
+		}
+	}
+
 	if task.Metadata.CreateTime == nil {
 		task.Metadata.CreateTime = timestamppb.Now()
 	}

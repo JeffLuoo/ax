@@ -15,6 +15,7 @@
 package v1alpha1_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -487,6 +488,31 @@ func TestValidateTask(t *testing.T) {
 			spec:    &v1alpha1.TaskSpec{Workspaces: []*v1alpha1.WorkspaceRef{{Name: "a", Path: "rel"}}},
 			wantErr: "spec.workspaces[0]: path \"rel\" must be absolute",
 		},
+		{name: "parent and budget", spec: &v1alpha1.TaskSpec{Parent: "root", Budget: &v1alpha1.Budget{MaxUsd: 2.5}}},
+		{name: "zero budget means none", spec: &v1alpha1.TaskSpec{Budget: &v1alpha1.Budget{}}},
+		{name: "invalid parent name", spec: &v1alpha1.TaskSpec{Parent: "Root"}, wantErr: "spec.parent: invalid value"},
+		{name: "parent in another atespace is not a name", spec: &v1alpha1.TaskSpec{Parent: "team-b/root"}, wantErr: "spec.parent: invalid value"},
+		{name: "own parent", spec: &v1alpha1.TaskSpec{Parent: "task"}, wantErr: "cannot be its own parent"},
+		{name: "negative budget", spec: &v1alpha1.TaskSpec{Budget: &v1alpha1.Budget{MaxUsd: -1}}, wantErr: "spec.budget.maxUsd"},
+		{name: "NaN budget", spec: &v1alpha1.TaskSpec{Budget: &v1alpha1.Budget{MaxUsd: math.NaN()}}, wantErr: "spec.budget.maxUsd"},
+		{name: "infinite budget", spec: &v1alpha1.TaskSpec{Budget: &v1alpha1.Budget{MaxUsd: math.Inf(1)}}, wantErr: "spec.budget.maxUsd"},
+		{
+			name: "valid quantities",
+			spec: &v1alpha1.TaskSpec{Resources: &v1alpha1.ResourcesSpec{
+				Requests: &v1alpha1.ResourceList{Cpu: "500m", Memory: "1Gi"},
+				Limits:   &v1alpha1.ResourceList{Cpu: "2", Memory: "4096Mi"},
+			}},
+		},
+		{
+			name:    "bad cpu limit",
+			spec:    &v1alpha1.TaskSpec{Resources: &v1alpha1.ResourcesSpec{Limits: &v1alpha1.ResourceList{Cpu: "two"}}},
+			wantErr: "spec.resources.limits.cpu",
+		},
+		{
+			name:    "zero memory request",
+			spec:    &v1alpha1.TaskSpec{Resources: &v1alpha1.ResourcesSpec{Requests: &v1alpha1.ResourceList{Memory: "0Gi"}}},
+			wantErr: "greater than zero",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -593,5 +619,37 @@ func TestValidateWorkspace_Files(t *testing.T) {
 	}
 	if err := v1alpha1.ValidateWorkspace(ws); err == nil || !strings.Contains(err.Error(), "spec.files[0]: path is required") {
 		t.Errorf("expected path is required error, got %v", err)
+	}
+}
+
+func TestOutcomeForExitCode(t *testing.T) {
+	for code, want := range map[int32]string{0: v1alpha1.OutcomeCompleted, 1: v1alpha1.OutcomeFailed, -1: v1alpha1.OutcomeFailed, 137: v1alpha1.OutcomeFailed} {
+		if got := v1alpha1.OutcomeForExitCode(code); got != want {
+			t.Errorf("OutcomeForExitCode(%d) = %q, want %q", code, got, want)
+		}
+	}
+}
+
+func TestTask_ParentBudgetOutcomeYAML(t *testing.T) {
+	in := `apiVersion: ax.io/v1alpha1
+kind: Task
+metadata: {name: child, atespace: team-a}
+spec:
+  parent: root
+  budget: {maxUsd: 1.5}
+status:
+  outcome: Failed
+  exitCode: 3
+  finishedAt: 2026-10-18T10:00:00Z
+`
+	var task v1alpha1.Task
+	if err := yaml.Unmarshal([]byte(in), &task); err != nil {
+		t.Fatal(err)
+	}
+	if task.GetSpec().GetParent() != "root" || task.GetSpec().GetBudget().GetMaxUsd() != 1.5 {
+		t.Errorf("spec = %v", task.GetSpec())
+	}
+	if task.GetStatus().GetOutcome() != "Failed" || task.GetStatus().GetExitCode() != 3 || task.GetStatus().GetFinishedAt().AsTime().Hour() != 10 {
+		t.Errorf("status = %v", task.GetStatus())
 	}
 }

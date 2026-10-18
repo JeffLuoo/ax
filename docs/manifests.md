@@ -33,7 +33,25 @@ spec:
       goal: "Install dependencies and run the test suite"   # Antigravity prepares the workspace to this goal on first run
 
   debug: true   # serve guest services inside the sandbox so `ax ssh` works; off by default
+
+  parent: planner   # optional: the task that started this task, in the same atespace
+  budget:
+    maxUsd: 5.00    # optional: the spending limit in USD, for model tokens and compute together; 0 means none
 ```
+
+### Task trees and budgets
+
+`spec.parent` puts a task in a task tree. It names another task in the same atespace, and that task must exist when you apply the child. `ax apply` rejects a parent that does not exist, a parent that is being deleted, and a task that names itself. A parent in another atespace is not possible, so a task tree never crosses an atespace.
+
+`spec.budget.maxUsd` is the spending limit that the task declares, in US dollars. It must be a finite number of 0 or more; 0 means no limit. AX stores the budget and sends it, with the parent, to Agent FinOps in the `ax.task.state_changed` event. `ax cost task <name>` shows the spend against the budget. AX does not stop a task that spends more than its budget.
+
+### Sandbox size
+
+`spec.resources.limits` sets the size of the sandbox: AX writes the CPU and memory limits into the task's Agent Substrate actor template, and Substrate books that size on a worker. When `limits` is not set, AX uses `requests`. When neither is set, AX uses the defaults of `ax-server` (`--default-task-cpu`, default `1`, and `--default-task-memory`, default `2Gi`). The values are Kubernetes quantities, for example `500m`, `2`, or `4Gi`, and they must be greater than zero.
+
+### Outcome
+
+After the task command exits, `status.outcome` is `Completed` (exit status 0) or `Failed` (any other status), with `status.exitCode` and `status.finishedAt`. The runner in the sandbox reports the exit, so the outcome is what the sandbox says. The runner keeps the exit on the durable volume and does not start the command again after a resume.
 
 ### Binding several workspaces
 

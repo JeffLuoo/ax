@@ -78,6 +78,19 @@ message TaskSpec {
   // debug enables the in-container guest services (process execution and file
   // access) that back `ax ssh`. Off by default.
   bool debug = 6;
+  // parent names the task that started this task, in the same atespace. It
+  // puts the task in a task tree, for example for cost rollups. Empty for a
+  // root task. The parent must exist when the task is created.
+  string parent = 7;
+  // budget is the spending limit that the task declares.
+  Budget budget = 8;
+}
+
+// Budget is a task's spending limit.
+message Budget {
+  // max_usd is the most that the task can spend, in US dollars, on model
+  // tokens and compute together. 0 means no limit.
+  double max_usd = 1;
 }
 
 message EnvVar {
@@ -109,6 +122,14 @@ message TaskStatus {
   // json_name keeps the established `workerIP` spelling in YAML and JSON.
   string worker_ip = 4 [json_name = "workerIP"];
   repeated Condition conditions = 7;
+  // outcome is "Completed" or "Failed" after the task command exits, and
+  // empty before. The runner in the sandbox reports it, so it is what the
+  // sandbox says, not a verified fact.
+  string outcome = 8;
+  // exit_code is the exit status of the task command when outcome is set.
+  int32 exit_code = 9;
+  // finished_at is when the task command exited.
+  google.protobuf.Timestamp finished_at = 10;
 }
 
 message Condition {

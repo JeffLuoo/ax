@@ -783,3 +783,53 @@ func TestServer_TransientSubstrateUnavailableRecovery(t *testing.T) {
 		t.Errorf("expected stored phase 'Pending' after transient ResumeTask error, got %q", storedAfterResumeErr.GetStatus().GetPhase())
 	}
 }
+
+func TestCreateTask_ParentRules(t *testing.T) {
+	ms := memory.NewStore()
+	srv := server.NewServer(ms)
+	ctx := context.Background()
+	create := func(atespace, name, parent string) error {
+		_, err := srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
+			Metadata: &v1alpha1.ObjectMeta{Name: name, Atespace: atespace},
+			Spec:     &v1alpha1.TaskSpec{Parent: parent, Budget: &v1alpha1.Budget{MaxUsd: 1}},
+		}})
+		return err
+	}
+
+	if err := create("team-a", "child", "root"); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("child before its parent: got %v, want FailedPrecondition", err)
+	}
+	if err := create("team-a", "root", ""); err != nil {
+		t.Fatalf("root: %v", err)
+	}
+	if err := create("team-a", "child", "root"); err != nil {
+		t.Fatalf("child in the parent's atespace: %v", err)
+	}
+	// The same name in another atespace is a different task.
+	if err := create("team-b", "child-b", "root"); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("parent in another atespace: got %v, want FailedPrecondition", err)
+	}
+	got, err := srv.GetTask(ctx, &v1alpha1.GetTaskRequest{Atespace: "team-a", Name: "child"})
+	if err != nil || got.GetSpec().GetParent() != "root" || got.GetSpec().GetBudget().GetMaxUsd() != 1 {
+		t.Fatalf("stored child = %v, %v", got, err)
+	}
+
+	// A parent that is being deleted takes no new children.
+	root, _ := srv.GetTask(ctx, &v1alpha1.GetTaskRequest{Atespace: "team-a", Name: "root"})
+	root.Status.Phase = v1alpha1.PhaseTerminating
+	if err := ms.SaveTask(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := create("team-a", "late-child", "root"); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("child of a terminating parent: got %v, want FailedPrecondition", err)
+	}
+
+	// A negative budget is rejected before anything is stored.
+	_, err = srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "spender", Atespace: "team-a"},
+		Spec:     &v1alpha1.TaskSpec{Budget: &v1alpha1.Budget{MaxUsd: -5}},
+	}})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("negative budget: got %v, want InvalidArgument", err)
+	}
+}
