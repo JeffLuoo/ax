@@ -24,10 +24,13 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -47,10 +50,69 @@ const (
 	// binds no workspaces.
 	DefaultWorkspacePath = v1alpha1.DefaultWorkspacePath
 
+	// DefaultStateDir is where the runner keeps state that must survive a
+	// resume when Config.StateDir is empty. Agent Substrate restores only the
+	// durable workspace volume into the new container, so it lives there.
+	DefaultStateDir = v1alpha1.DefaultWorkspacePath + "/.ax"
+	// ExitRecordFile, under the state directory, holds the task command's
+	// exit once the command has exited on its own.
+	ExitRecordFile = "command-exit.json"
+
 	// stopGracePeriod is how long a running task command gets to exit after
 	// SIGTERM before it is killed during shutdown.
 	stopGracePeriod = 10 * time.Second
 )
+
+// ExitRecord is the task command's exit, as the runner keeps it in the state
+// directory.
+type ExitRecord struct {
+	ExitCode   int       `json:"exitCode"`
+	FinishedAt time.Time `json:"finishedAt"`
+}
+
+// readExitRecord returns the exit record in dir, or nil when there is none.
+func readExitRecord(dir string) (*ExitRecord, error) {
+	data, err := os.ReadFile(filepath.Join(dir, ExitRecordFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var rec ExitRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", ExitRecordFile, err)
+	}
+	return &rec, nil
+}
+
+// writeExitRecord stores rec in dir. It writes a temporary file, syncs it, and
+// renames it, so a snapshot never captures a partial record.
+func writeExitRecord(dir string, rec ExitRecord) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ExitRecordFile+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, ExitRecordFile))
+}
 
 // Config controls a single Run.
 type Config struct {
@@ -68,6 +130,9 @@ type Config struct {
 	Workspaces []*v1alpha1.Workspace
 	// OnCommandExit, when set, is called once the task command has exited.
 	OnCommandExit func(CommandExit)
+	// StateDir is where the runner keeps the command's exit record so that it
+	// survives a resume. Empty means DefaultStateDir.
+	StateDir string
 }
 
 // mount pairs one workspace binding from the task spec with the Workspace
@@ -119,6 +184,13 @@ type CommandExit struct {
 // cancelled a running command is sent SIGTERM, given a grace period, and then
 // killed.
 //
+// When the command exits on its own, Run writes an exit record to the state
+// directory and serves it at GET /statusz. A later Run on the same volume, for
+// example after a resume, finds the record and serves it again: it does not
+// set up the workspaces or start the command a second time. A command that Run
+// stops because ctx is cancelled (a suspend) gets no record, so it starts again
+// on the next Run.
+//
 // Workspace setup failures are logged but do not abort the run; the task simply
 // never reports ready. Run returns an error only when the runner itself cannot
 // start, for example when the metadata server or the command fails to launch.
@@ -164,6 +236,23 @@ func Run(ctx context.Context, cfg Config) error {
 		_ = metaServer.Stop(context.Background())
 	}()
 
+	stateDir := cfg.StateDir
+	if stateDir == "" {
+		stateDir = DefaultStateDir
+	}
+	prev, err := readExitRecord(stateDir)
+	if err != nil {
+		// An unreadable record is not proof that the command ran, so run it.
+		slog.Error("reading the task command's exit record; starting the command", "dir", stateDir, "error", err)
+	}
+	if prev != nil {
+		metaServer.SetWorkspaceReady(true)
+		metaServer.SetCommandExited(prev.ExitCode, prev.FinishedAt)
+		slog.Info("task command already exited; not starting it again", "exitCode", prev.ExitCode, "finishedAt", prev.FinishedAt)
+		<-ctx.Done()
+		return nil
+	}
+
 	ready := true
 	for _, m := range mounts {
 		if _, err := workspace.SetupWorkspace(ctx, m.ws, m.path, m.ref.GetGoal()); err != nil {
@@ -196,6 +285,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting task command %v: %w", cmdArgs, err)
 	}
+	metaServer.SetCommandRunning()
 	slog.Info("started task command", "pid", cmd.Process.Pid, "command", cmdArgs)
 
 	exited := make(chan error, 1)
@@ -203,6 +293,14 @@ func Run(ctx context.Context, cfg Config) error {
 
 	select {
 	case err := <-exited:
+		rec := ExitRecord{ExitCode: -1, FinishedAt: time.Now().UTC()}
+		if cmd.ProcessState != nil {
+			rec.ExitCode = cmd.ProcessState.ExitCode()
+		}
+		if werr := writeExitRecord(stateDir, rec); werr != nil {
+			slog.Error("writing the task command's exit record; a resume will start the command again", "dir", stateDir, "error", werr)
+		}
+		metaServer.SetCommandExited(rec.ExitCode, rec.FinishedAt)
 		reportExit(cfg, cmd, err)
 		// Keep the sandbox up and inspectable until told to stop.
 		<-ctx.Done()

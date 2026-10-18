@@ -33,6 +33,7 @@ The `/workspace` volume is what survives suspend and resume. Agent Substrate sna
 |---|---|
 | `/healthz` | Return `200` as soon as the runner is alive. |
 | `/readyz` | Return `503` until the workspace is prepared, then `200`. AX polls this to set the task's `WorkspaceReady` condition, and `ax watch` shows the transition. |
+| `/statusz` | Return JSON `{"state": "none"\|"running"\|"exited", "exitCode": n, "finishedAt": "<RFC 3339>"}`. `exitCode` and `finishedAt` are present only when `state` is `exited`. `ax-server` reads this for each running task that has no outcome, and sets `status.outcome`. |
 
 **Serve metadata on loopback.** These endpoints are for your command, so serve them on a loopback address (the default runner uses `127.0.0.1:8099`) and pass that base URL as `AX_METADATA_URL`. Don't serve them on port 80.
 
@@ -45,7 +46,9 @@ The `/workspace` volume is what survives suspend and resume. Agent Substrate sna
 
 **Run the command and supervise it.** Start `spec.command` as a child process with the first workspace as its working directory. Give it `AX_METADATA_URL` pointing at your loopback metadata server plus every `spec.env` entry. Put it in its own process group so you can signal everything it spawns.
 
-**Stay up after the command exits.** The runner is PID 1, and the container lives as long as it does. If the runner exits when the command does, the metadata server goes with it and `ax ssh` stops working. Log the exit status and keep serving until you are told to stop. The control plane does not currently read the command's exit status back from the container.
+**Stay up after the command exits.** The runner is PID 1, and the container lives as long as it does. If the runner exits when the command does, the metadata server goes with it and `ax ssh` stops working. Log the exit status and keep serving until you are told to stop.
+
+**Record the exit on the durable volume.** When the command exits on its own, write its exit status and time to the durable volume, and serve them at `/statusz`. On a later boot, for example after a resume, find that record, serve it, and do not start the command again: a command that completed must not run a second time. A command that you stop because of `SIGTERM` is not an exit; write no record, so that the command starts again after the resume. The default runner writes `/workspace/.ax/command-exit.json` (set another directory with `--state-dir`). Agent Substrate restores only the `/workspace` volume on resume, so a file elsewhere in the container does not survive.
 
 **Shut down cleanly on `SIGTERM`.** Stop and suspend both deliver `SIGTERM` to PID 1. Forward it to the command's process group, wait a bounded grace period, then `SIGKILL` whatever is left. Flush anything the agent needs to survive a resume before you exit.
 
@@ -178,5 +181,6 @@ Once the image is built, the fastest end-to-end check is a task with `debug: tru
 - Prepares each workspace exactly once across restarts and resumes, at its own path
 - Starts `spec.command` in the first workspace with `AX_METADATA_URL` and `spec.env`
 - Keeps running after the command exits
+- Records the command's exit on the durable volume, serves it at `/statusz`, and does not start the command again after a resume
 - Forwards `SIGTERM` to the command's process group and exits after a grace period
 - Serves guest gRPC services on port 80 only when `spec.debug` is true

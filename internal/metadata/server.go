@@ -16,6 +16,7 @@ package metadata
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/agent-substrate/env/guest"
 	"github.com/google/ax/pkg/apis/v1alpha1"
@@ -46,6 +48,29 @@ type Server struct {
 	task           *v1alpha1.Task
 	workspaces     []*v1alpha1.Workspace
 	workspaceReady bool
+	command        CommandStatus
+}
+
+// Values of CommandStatus.State.
+const (
+	// CommandNone: no command is running and none has exited, for example
+	// while the workspace is set up or when the task has no command.
+	CommandNone = "none"
+	// CommandRunning: the task command is running.
+	CommandRunning = "running"
+	// CommandExited: the task command exited on its own.
+	CommandExited = "exited"
+)
+
+// CommandStatus is what GET /statusz reports about the task command.
+type CommandStatus struct {
+	State string `json:"state"`
+	// ExitCode is the command's exit status; set only when State is
+	// CommandExited. It is -1 when a signal killed the command.
+	ExitCode *int `json:"exitCode,omitempty"`
+	// FinishedAt is when the command exited, in RFC 3339; set only when State
+	// is CommandExited.
+	FinishedAt string `json:"finishedAt,omitempty"`
 }
 
 // ServerOptions configures optional settings for the metadata and guest server.
@@ -70,6 +95,7 @@ func NewServer(port int, task *v1alpha1.Task, workspaces []*v1alpha1.Workspace, 
 	s := &Server{
 		task:       task,
 		workspaces: compactWorkspaces(workspaces),
+		command:    CommandStatus{State: CommandNone},
 	}
 
 	// Guest services expose process execution and file access inside the container,
@@ -99,6 +125,7 @@ func NewServer(port int, task *v1alpha1.Task, workspaces []*v1alpha1.Workspace, 
 	probeMux := http.NewServeMux()
 	probeMux.HandleFunc("/healthz", s.handleHealthz)
 	probeMux.HandleFunc("/readyz", s.handleReadyz)
+	probeMux.HandleFunc("/statusz", s.handleStatusz)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.grpcServer != nil && r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
@@ -223,6 +250,39 @@ func (s *Server) IsWorkspaceReady() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.workspaceReady
+}
+
+// SetCommandRunning records that the task command has started.
+func (s *Server) SetCommandRunning() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.command = CommandStatus{State: CommandRunning}
+}
+
+// SetCommandExited records that the task command exited on its own with code
+// at finishedAt.
+func (s *Server) SetCommandExited(code int, finishedAt time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.command = CommandStatus{State: CommandExited, ExitCode: &code, FinishedAt: finishedAt.UTC().Format(time.RFC3339Nano)}
+}
+
+// Command returns what /statusz reports about the task command.
+func (s *Server) Command() CommandStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.command
+}
+
+// handleStatusz reports the task command's state as JSON, so that ax-server
+// can record the task's outcome when the command exits.
+func (s *Server) handleStatusz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.Command())
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

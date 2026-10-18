@@ -16,6 +16,7 @@ package runner_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -181,6 +182,7 @@ func newHarness(t *testing.T) *harness {
 		MetadataPort:  freePort(t),
 		Task:          h.task,
 		OnCommandExit: func(e runner.CommandExit) { h.exited <- e },
+		StateDir:      filepath.Join(dir, "state"),
 	}
 	return h
 }
@@ -301,5 +303,173 @@ func TestRun_SetsUpEveryWorkspace(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "name: code") || !strings.Contains(string(body), "name: tools") || strings.Index(string(body), "name: code") > strings.Index(string(body), "name: tools") {
 		t.Errorf("workspaces endpoint should list code then tools:\n%s", body)
+	}
+}
+
+// statusz fetches the runner's /statusz report.
+func statusz(t *testing.T, port int) map[string]any {
+	t.Helper()
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/statusz", port))
+	if err != nil {
+		t.Fatalf("GET /statusz: %v", err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decoding /statusz: %v", err)
+	}
+	return out
+}
+
+// waitState polls /statusz until it reports want.
+func waitState(t *testing.T, port int, want string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		waitHealthy(t, port)
+		got := statusz(t, port)
+		if got["state"] == want {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("/statusz state = %v, want %q", got, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestRun_StatuszReportsRunningThenExited(t *testing.T) {
+	h := newHarness(t)
+	release := filepath.Join(t.TempDir(), "release")
+	h.task.Spec.Command = []string{"sh", "-c", "while [ ! -e " + release + " ]; do sleep 0.02; done; exit 4"}
+	h.start(t)
+
+	waitState(t, h.cfg.Port, "running")
+	if err := os.WriteFile(release, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := waitState(t, h.cfg.Port, "exited")
+	if got["exitCode"] != float64(4) {
+		t.Errorf("exitCode = %v, want 4", got["exitCode"])
+	}
+	if _, err := time.Parse(time.RFC3339Nano, fmt.Sprint(got["finishedAt"])); err != nil {
+		t.Errorf("finishedAt %v is not RFC 3339: %v", got["finishedAt"], err)
+	}
+	data, err := os.ReadFile(filepath.Join(h.cfg.StateDir, runner.ExitRecordFile))
+	if err != nil {
+		t.Fatalf("exit record not written: %v", err)
+	}
+	var rec runner.ExitRecord
+	if err := json.Unmarshal(data, &rec); err != nil || rec.ExitCode != 4 || rec.FinishedAt.IsZero() {
+		t.Errorf("exit record = %s (%v)", data, err)
+	}
+}
+
+func TestRun_StatuszWithoutCommandIsNone(t *testing.T) {
+	h := newHarness(t)
+	h.start(t)
+	waitHealthy(t, h.cfg.Port)
+	if got := statusz(t, h.cfg.Port); got["state"] != "none" || got["exitCode"] != nil {
+		t.Errorf("/statusz = %v, want state none and no exit code", got)
+	}
+}
+
+func TestRun_DoesNotStartTheCommandAgainAfterItExited(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "runs")
+	command := []string{"sh", "-c", "echo run >> " + marker + "; exit 2"}
+
+	first := newHarness(t)
+	first.task.Spec.Command = command
+	if exit := first.runUntilCommandExits(t); exit.ExitCode != 2 {
+		t.Fatalf("first run exit = %+v", exit)
+	}
+	first.cancel()
+	first.waitFinished(t, 5*time.Second)
+
+	// A resume: a new runner on the same durable volume.
+	second := newHarness(t)
+	second.task.Spec.Command = command
+	second.cfg.StateDir = first.cfg.StateDir
+	second.start(t)
+	got := waitState(t, second.cfg.Port, "exited")
+	if got["exitCode"] != float64(2) {
+		t.Errorf("exitCode after resume = %v, want the stored 2", got["exitCode"])
+	}
+	// The stored outcome counts as ready: setup does not run a second time.
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/readyz", second.cfg.Port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("readyz after resume = %d, want 200", resp.StatusCode)
+	}
+	time.Sleep(200 * time.Millisecond)
+	runs, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(runs), "run"); n != 1 {
+		t.Errorf("the command ran %d times, want 1", n)
+	}
+	select {
+	case e := <-second.exited:
+		t.Errorf("OnCommandExit called on the resumed runner: %+v", e)
+	default:
+	}
+}
+
+func TestRun_StoppedCommandHasNoRecordAndStartsAgain(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "runs")
+	command := []string{"sh", "-c", "echo run >> " + marker + "; sleep 30"}
+
+	waitRuns := func(n int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			runs, _ := os.ReadFile(marker)
+			if strings.Count(string(runs), "run") == n {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("want %d runs of the command, marker has %q", n, runs)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	first := newHarness(t)
+	first.task.Spec.Command = command
+	first.start(t)
+	waitState(t, first.cfg.Port, "running")
+	waitRuns(1)
+	first.cancel() // a suspend stops the command
+	first.waitFinished(t, 15*time.Second)
+	if _, err := os.Stat(filepath.Join(first.cfg.StateDir, runner.ExitRecordFile)); !os.IsNotExist(err) {
+		t.Fatalf("a stopped command left an exit record (stat err %v)", err)
+	}
+
+	second := newHarness(t)
+	second.task.Spec.Command = command
+	second.cfg.StateDir = first.cfg.StateDir
+	second.start(t)
+	waitState(t, second.cfg.Port, "running")
+	waitRuns(2)
+}
+
+func TestRun_UnreadableRecordStartsTheCommand(t *testing.T) {
+	h := newHarness(t)
+	if err := os.MkdirAll(h.cfg.StateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.cfg.StateDir, runner.ExitRecordFile), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.task.Spec.Command = []string{"true"}
+	if exit := h.runUntilCommandExits(t); exit.ExitCode != 0 {
+		t.Fatalf("exit = %+v", exit)
+	}
+	if got := waitState(t, h.cfg.Port, "exited"); got["exitCode"] != float64(0) {
+		t.Errorf("/statusz = %v", got)
 	}
 }

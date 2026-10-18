@@ -7,7 +7,7 @@ Every task container starts with `ax-task-runner` as PID 1. On boot it:
 3. On the first run, prepares each workspace at its own path, in binding order: clones Git repos, sets up the skills path, and, if the binding has a goal, hands that goal to an Antigravity agent to finish environment setup. The agent needs `GEMINI_API_KEY` in the container and gets 10 minutes by default; set `AX_BOOTSTRAP_TIMEOUT` to a Go duration to change that. The task reports not-ready until every workspace, including any agent run, has finished.
 4. Starts `spec.command` as a child process, with the first workspace as its working directory and `AX_METADATA_URL` plus `spec.env` in its environment, and supervises it.
 
-The runner stays up as PID 1 whether or not the command is still running, so the metadata server keeps answering and `ax ssh` still works after the command has exited. Its exit code is logged. When the sandbox is stopped or suspended, the runner sends the command's process group `SIGTERM`, waits ten seconds, and then kills whatever is left.
+The runner stays up as PID 1 whether or not the command is still running, so the metadata server keeps answering and `ax ssh` still works after the command has exited. Its exit code is logged and written to `/workspace/.ax/command-exit.json` on the durable volume. After a resume, the runner finds that file, serves the stored exit at `/statusz`, and does not set up the workspaces or start the command again. A command that the runner stopped for a suspend has no such file, so it starts again after the resume. When the sandbox is stopped or suspended, the runner sends the command's process group `SIGTERM`, waits ten seconds, and then kills whatever is left.
 
 ## Probes
 
@@ -17,6 +17,7 @@ Port 80 speaks HTTP/1.1 and `h2c`. Agent Substrate and the AX server use it to c
 |---|---|---|---|
 | `/healthz` | `GET` | `text/plain` | Liveness. Always `200 OK`. |
 | `/readyz` | `GET` | `text/plain` | Readiness. `503` while the workspace is initializing, `200` once clones, MCP config, and skills are in place. |
+| `/statusz` | `GET` | `application/json` | The task command's state: `{"state": "none"}`, `{"state": "running"}`, or `{"state": "exited", "exitCode": 3, "finishedAt": "2026-10-18T08:30:00Z"}`. `ax-server` reads it to set the task's outcome. |
 
 ## Metadata server
 

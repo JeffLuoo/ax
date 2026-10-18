@@ -16,6 +16,7 @@ package metadata_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -258,5 +259,55 @@ func TestMetadataServer_MetadataOnlyOnLoopback(t *testing.T) {
 	}
 	if !checked {
 		t.Log("no non-loopback IPv4 address found; skipped the external address check")
+	}
+}
+
+func TestMetadataServer_Statusz(t *testing.T) {
+	srv := metadata.NewServer(0, &v1alpha1.Task{Metadata: &v1alpha1.ObjectMeta{Name: "t"}}, nil)
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop(context.Background())
+	_, port, _ := net.SplitHostPort(srv.ProbeAddr())
+	url := "http://127.0.0.1:" + port + "/statusz"
+
+	get := func() map[string]any {
+		t.Helper()
+		resp, err := http.Get(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q", ct)
+		}
+		var out map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	if got := get(); got["state"] != metadata.CommandNone || len(got) != 1 {
+		t.Errorf("initial /statusz = %v, want only state none", got)
+	}
+	srv.SetCommandRunning()
+	if got := get(); got["state"] != metadata.CommandRunning || len(got) != 1 {
+		t.Errorf("running /statusz = %v", got)
+	}
+	at := time.Date(2026, 10, 18, 9, 30, 0, 0, time.FixedZone("x", 3600))
+	srv.SetCommandExited(137, at)
+	got := get()
+	if got["state"] != metadata.CommandExited || got["exitCode"] != float64(137) || got["finishedAt"] != "2026-10-18T08:30:00Z" {
+		t.Errorf("exited /statusz = %v", got)
+	}
+
+	resp, err := http.Post(url, "text/plain", strings.NewReader("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST /statusz = %d, want 405", resp.StatusCode)
 	}
 }

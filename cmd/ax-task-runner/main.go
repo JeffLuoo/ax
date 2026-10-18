@@ -55,6 +55,7 @@ func main() {
 	flag.IntVar(&cfg.MetadataPort, "metadata-port", runner.DefaultMetadataPort, "Loopback-only port for the metadata endpoints")
 	flag.StringVar(&taskFile, "task-file", "", "Read the Task YAML from this file instead of AX_TASK_YAML")
 	flag.Var(&wsFiles, "workspace-file", "Read Workspace YAML from this file instead of the environment; repeatable, and each file may hold several documents")
+	flag.StringVar(&cfg.StateDir, "state-dir", runner.DefaultStateDir, "Directory on the durable volume where the runner keeps the command's exit record")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
