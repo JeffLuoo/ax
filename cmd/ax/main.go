@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/google/ax/internal/guest"
+	"github.com/google/ax/internal/kubecred"
 	"github.com/google/ax/internal/tunnel"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc"
@@ -63,6 +64,7 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+	axCredentials = kubecred.NewSource(kubeContext)
 
 	// Commands that don't require an AX server connection
 	switch cmd {
@@ -282,10 +284,19 @@ Flags:
   --finops-namespace string     Kubernetes namespace where FinOps is installed (default: "ate-finops")`)
 }
 
+// axCredentials gives the bearer token that ax-server verifies with a
+// Kubernetes TokenReview: the credential of the --context kubeconfig context,
+// or $AX_TOKEN. Nil sends no token.
+var axCredentials *kubecred.Source
+
 func getAXClient(serverURL string) (v1alpha1.AXClient, *grpc.ClientConn, error) {
 	target := strings.TrimPrefix(serverURL, "http://")
 	target = strings.TrimPrefix(target, "https://")
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if axCredentials != nil {
+		opts = append(opts, grpc.WithPerRPCCredentials(kubecred.PerRPC(axCredentials)))
+	}
+	conn, err := grpc.NewClient(target, opts...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connecting to %s: %w", target, err)
 	}

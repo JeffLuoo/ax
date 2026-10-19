@@ -33,6 +33,8 @@ Storing millions of short-lived tasks as Kubernetes CRDs pushes etcd past its co
 
 The control plane exposes the `ax.v1alpha1.AX` gRPC service. Health checks are plain HTTP: `GET /healthz` on the same port returns `200 OK`.
 
+Each RPC needs a bearer token. `ax-server` verifies it with a Kubernetes TokenReview and checks the RPC with a SubjectAccessReview on the API group `ax.io`. The [Access control](docs/concepts.md#access-control) section lists the verb and the resource of each RPC.
+
 **Tasks**
 
 | RPC | Description |

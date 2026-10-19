@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/ax/internal/auth"
 	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store"
@@ -844,7 +845,7 @@ func TestCreateTask_ParentRules(t *testing.T) {
 func TestCreateTask_DropsCallerStatus(t *testing.T) {
 	ms := memory.NewStore()
 	srv := server.NewServer(ms)
-	ctx := context.Background()
+	ctx := auth.WithPrincipal(context.Background(), auth.Principal{Username: "alice@example.com"})
 	_, err := srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
 		Metadata: &v1alpha1.ObjectMeta{Name: "forged", Atespace: "team-a"},
 		Spec:     &v1alpha1.TaskSpec{},
@@ -869,8 +870,8 @@ func TestCreateTask_DropsCallerStatus(t *testing.T) {
 	if st.GetPhase() != "Suspended" || st.GetOutcome() != "" || st.GetFinishedAt() != nil {
 		t.Errorf("stored status = %v, want phase Suspended and no outcome or finish time", st)
 	}
-	if st.GetCreatedBy() != "" {
-		t.Errorf("created_by = %q, want none without authentication", st.GetCreatedBy())
+	if st.GetCreatedBy() != "alice@example.com" {
+		t.Errorf("created_by = %q, want the verified caller alice@example.com", st.GetCreatedBy())
 	}
 	if st.GetParentId() != "" || st.GetId() == "" || st.GetId() == "task-someone-else" {
 		t.Errorf("id = %q, parent_id = %q, want a server ID and no parent ID", st.GetId(), st.GetParentId())

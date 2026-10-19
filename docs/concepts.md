@@ -45,3 +45,23 @@ A binding can also carry a `goal`, a plain-language description of the environme
 A configuration for a model provider and its parameters: which provider to call, the model identifier, provider-specific generation parameters such as max_tokens, and references to the Kubernetes secret holding the credentials.
 
 Declaring models as cluster resources makes them manageable and reusable across tasks. The configuration lives in one place instead of in every agent's environment, so rotating a key, pinning a new model version, or tuning parameters is a single `ax apply` rather than a hunt through task definitions. AX's own components read `Model` resources as well, for example when planning a workspace from a goal.
+
+## Access control
+
+`ax-server` acts on Agent Substrate with its own credentials for all atespaces. For this reason, it checks each caller before it does an RPC. The `ax` CLI sends the bearer token of your kubeconfig context, or the token in `$AX_TOKEN`. `ax-server` verifies the token with a Kubernetes TokenReview. Then it sends a SubjectAccessReview for the RPC.
+
+The SubjectAccessReview uses the API group `ax.io`, a resource (`tasks`, `workspaces`, or `models`), a verb, and the atespace as the namespace. These resources are not in the Kubernetes API. Only `ax-server` reads RBAC rules for them.
+
+| RPC | Verb | Resource |
+|---|---|---|
+| `GetTask`, `GetWorkspace`, `GetModel` | `get` | `tasks`, `workspaces`, `models` |
+| `ListTasks`, `ListWorkspaces`, `ListModels` | `list` | `tasks`, `workspaces`, `models` |
+| `WatchTask` | `watch` | `tasks` |
+| `CreateTask` | `create` | `tasks` |
+| `SuspendTask`, `ResumeTask` | `update` | `tasks` |
+| `UpdateWorkspace`, `UpdateModel` | `update` | `workspaces`, `models` |
+| `DeleteTask`, `DeleteWorkspace`, `DeleteModel` | `delete` | `tasks`, `workspaces`, `models` |
+
+To give a user access to one atespace, create a Kubernetes namespace with the name of the atespace, and bind a role there with a RoleBinding. A ClusterRoleBinding gives access to all atespaces. A list with no atespace (`ax get tasks` without `-a`) covers all atespaces, so it needs a ClusterRoleBinding. The deploy manifest has two example roles: `ax-viewer` and `ax-editor`.
+
+`ax-server` rejects a missing or incorrect token with `Unauthenticated`, and a denied RPC with `PermissionDenied`. If it cannot reach the Kubernetes API, it rejects the RPC with `Unavailable`. `GET /healthz` needs no token. The `ax-server` flag `--auth=false` turns the checks off; then each caller can do all RPCs in all atespaces.

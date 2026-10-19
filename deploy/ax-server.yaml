@@ -31,6 +31,14 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch"]
+  # With --auth, ax-server verifies each caller's token with a TokenReview
+  # and checks each RPC with a SubjectAccessReview.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -44,6 +52,41 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: ax-server
+---
+# Example roles for AX users. ax-server checks each RPC as a verb on a
+# resource in API group ax.io (tasks, workspaces, models), with the atespace
+# as the namespace. These resources are not in the Kubernetes API; only
+# ax-server reads these rules. Bind a role with a RoleBinding in a namespace
+# with the name of the atespace, or with a ClusterRoleBinding for all
+# atespaces. A list with no atespace (ax get without -a) needs a
+# ClusterRoleBinding. For example:
+#
+#   kubectl create namespace team-a
+#   kubectl create rolebinding alice-ax-editor -n team-a \
+#     --clusterrole=ax-editor --user=alice@example.com
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ax-viewer
+rules:
+  - apiGroups: ["ax.io"]
+    resources: ["tasks", "workspaces", "models"]
+    verbs: ["get", "list", "watch"]
+---
+# ax-editor can also create, suspend, resume (update), and delete tasks, and
+# write workspaces and models. A task runs on Substrate with ax-server's
+# credentials and spends the budget of its atespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ax-editor
+rules:
+  - apiGroups: ["ax.io"]
+    resources: ["tasks"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: ["ax.io"]
+    resources: ["workspaces", "models"]
+    verbs: ["get", "list", "watch", "update", "delete"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -77,6 +120,16 @@ spec:
             - "--substrate-ca-file=/run/servicedns-ca/trust-bundle.pem"
             - "--template=default-template"
             - "--template-atespace=ax-system"
+            # Verify each caller with a Kubernetes TokenReview and check each
+            # RPC against the ax.io RBAC rules above. /healthz stays open.
+            - "--auth=true"
+            # The ax CLI sends the credential of the user's kubeconfig. On
+            # GKE that token is for the API server's own audience, not for
+            # ax-server, so ax-server must accept it. Such a token also works
+            # against the Kubernetes API. Set this to false when all callers
+            # send a token for the ax-server audience, for example from
+            # "kubectl create token --audience=ax-server".
+            - "--auth-allow-apiserver-tokens=true"
           env:
             - name: ATENET_ROUTER_ADDR
               value: "atenet-router.ate-system.svc.cluster.local:80"

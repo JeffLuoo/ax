@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/ax/internal/auth"
 	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/lock"
 	"github.com/google/ax/internal/store"
@@ -50,6 +51,9 @@ type Options struct {
 	// Events receives a task lifecycle event for every create, phase change,
 	// delete, and outcome. Nil sends nothing.
 	Events events.Emitter
+	// Guard authenticates and authorizes every RPC. Nil allows every caller,
+	// and tasks then have no status.created_by.
+	Guard *auth.Guard
 }
 
 // Server provides the gRPC API for AX.
@@ -78,12 +82,17 @@ func NewServer(s store.Store, opts ...Options) *Server {
 		emitter = events.Nop{}
 	}
 
+	var serverOpts []grpc.ServerOption
+	if opt.Guard != nil {
+		serverOpts = append(serverOpts, grpc.ChainUnaryInterceptor(opt.Guard.Unary), grpc.ChainStreamInterceptor(opt.Guard.Stream))
+	}
+
 	srv := &Server{
 		store:      s,
 		locker:     locker,
 		reconciler: opt.Reconciler,
 		events:     emitter,
-		grpcServer: grpc.NewServer(),
+		grpcServer: grpc.NewServer(serverOpts...),
 	}
 	v1alpha1.RegisterAXServer(srv.grpcServer, srv)
 	return srv
@@ -167,7 +176,7 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 	}
 	task := req.Task
 	// The server owns the status. A caller cannot set an outcome, an exit
-	// code, or a parent ID on create.
+	// code, a creator, or a parent ID on create.
 	task.Status = nil
 	if err := v1alpha1.ValidateTask(task); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -224,6 +233,9 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 		// A new task. A retry of a Pending create keeps the status of the
 		// first attempt.
 		task.Status = &v1alpha1.TaskStatus{Id: newTaskID(taskName), ParentId: parentID}
+		if p, ok := auth.PrincipalFrom(ctx); ok {
+			task.Status.CreatedBy = p.Username
+		}
 	}
 	task.Status.Phase = "Suspended"
 	if err := s.store.SaveTask(ctx, task); err != nil {

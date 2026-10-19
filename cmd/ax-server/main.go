@@ -21,9 +21,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/google/ax/internal/auth"
 	"github.com/google/ax/internal/controller"
 	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/lock"
@@ -32,6 +34,8 @@ import (
 	"github.com/google/ax/internal/substrate"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	goredis "github.com/redis/go-redis/v9"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 func main() {
@@ -52,6 +56,10 @@ func main() {
 		routerAddr              string
 		outcomePollInterval     time.Duration
 		outcomePollConcurrency  int
+		authEnabled             bool
+		authAudiences           string
+		authAllowAPIServer      bool
+		authCacheTTL            time.Duration
 	)
 
 	flag.StringVar(&listenAddr, "addr", ":8080", "HTTP listen address")
@@ -70,6 +78,10 @@ func main() {
 	flag.StringVar(&routerAddr, "router-addr", os.Getenv("ATENET_ROUTER_ADDR"), "atenet router host:port, for reading each running task's command state (default $ATENET_ROUTER_ADDR)")
 	flag.DurationVar(&outcomePollInterval, "outcome-poll-interval", server.DefaultOutcomePollInterval, "Time between reads of the command state of running tasks; 0 turns task outcomes off")
 	flag.IntVar(&outcomePollConcurrency, "outcome-poll-concurrency", server.DefaultOutcomePollConcurrency, "Most command state requests in flight at a time")
+	flag.BoolVar(&authEnabled, "auth", true, "Verify each caller's bearer token with a Kubernetes TokenReview and check each RPC with a SubjectAccessReview; false lets every caller do everything")
+	flag.StringVar(&authAudiences, "auth-audiences", auth.DefaultAudience, "Comma-separated audiences that a caller's token must be for")
+	flag.BoolVar(&authAllowAPIServer, "auth-allow-apiserver-tokens", false, "Also accept a token for the Kubernetes API server's own audiences, such as a kubeconfig credential")
+	flag.DurationVar(&authCacheTTL, "auth-cache-ttl", auth.DefaultCacheTTL, "How long to keep a token review result")
 	flag.Parse()
 
 	for name, q := range map[string]string{"--default-task-cpu": defaultTaskCPU, "--default-task-memory": defaultTaskMemory} {
@@ -136,10 +148,48 @@ func main() {
 		slog.Info("sending task events over OTLP", "event", events.EventName)
 	}
 
+	var guard *auth.Guard
+	if authEnabled {
+		// In the cluster this is the pod's service account; outside it,
+		// $KUBECONFIG.
+		cfg, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
+		if err != nil {
+			slog.Error("could not load the Kubernetes client config for --auth", "error", err)
+			os.Exit(1)
+		}
+		kube, err := kubernetes.NewForConfig(cfg)
+		if err != nil {
+			slog.Error("could not create the Kubernetes client for --auth", "error", err)
+			os.Exit(1)
+		}
+		var audiences []string
+		for _, a := range strings.Split(authAudiences, ",") {
+			if a = strings.TrimSpace(a); a != "" {
+				audiences = append(audiences, a)
+			}
+		}
+		if len(audiences) == 0 {
+			slog.Error("--auth-audiences names no audience")
+			os.Exit(2)
+		}
+		guard = &auth.Guard{
+			Authn: auth.NewTokenReviewAuthenticator(kube, auth.TokenReviewOptions{
+				Audiences:            audiences,
+				AllowAPIServerTokens: authAllowAPIServer,
+				CacheTTL:             authCacheTTL,
+			}),
+			Authz: auth.NewSubjectAccessReviewAuthorizer(kube),
+		}
+		slog.Info("authenticating callers with TokenReview", "audiences", audiences, "allowAPIServerTokens", authAllowAPIServer)
+	} else {
+		slog.Warn("--auth=false: every caller can act on every atespace with ax-server's Substrate credentials")
+	}
+
 	srv := server.NewServer(rStore, server.Options{
 		Locker:     rLocker,
 		Reconciler: reconciler,
 		Events:     emitter,
+		Guard:      guard,
 	})
 
 	httpServer := &http.Server{

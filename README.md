@@ -90,6 +90,14 @@ make deploy AX_IMAGE_REPO=<your-registry>
 
 This deploys Redis, then builds and deploys the control plane images with `ko`. Everything lands in the `ax-system` namespace.
 
+`ax-server` checks each caller with Kubernetes RBAC. The `ax` CLI sends the credential of your kubeconfig context. Before you run a task, give your user a role on the API group `ax.io`. For example, this command gives access to all atespaces:
+
+```bash
+kubectl create clusterrolebinding me-ax-editor --clusterrole=ax-editor --user="$(gcloud config get account)"
+```
+
+To give access to one atespace only, use a RoleBinding in a namespace with the name of the atespace. Refer to [Access control](docs/concepts.md#access-control).
+
 ### 3. Run your first task
 
 ```bash
