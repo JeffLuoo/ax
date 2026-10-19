@@ -9,6 +9,8 @@ Every task container starts with `ax-task-runner` as PID 1. On boot it:
 
 The runner stays up as PID 1 whether or not the command is still running, so the metadata server keeps answering and `ax ssh` still works after the command has exited. Its exit code is logged and written to `/workspace/.ax/command-exit.json` on the durable volume. After a resume, the runner finds that file, serves the stored exit at `/statusz`, and does not set up the workspaces or start the command again. A command that the runner stopped for a suspend has no such file, so it starts again after the resume. When the sandbox is stopped or suspended, the runner sends the command's process group `SIGTERM`, waits ten seconds, and then kills whatever is left.
 
+The task command, and any repository that a workspace clones, can write `/workspace/.ax`. So the agent can write its own exit record, and the outcome that `ax-server` records is what the sandbox reports, not a verified result. The task event to Agent FinOps carries `ax.task.outcome_source=sandbox` to show this. The runner checks the record before it uses it: the file must hold only `exitCode` and `finishedAt`, the exit code must be from -1 to 255, and the finish time must be set and not more than one minute in the future. The runner logs an error, ignores a record that fails the check, and starts the command.
+
 ## Probes
 
 Port 80 speaks HTTP/1.1 and `h2c`. Agent Substrate and the AX server use it to check on the task:

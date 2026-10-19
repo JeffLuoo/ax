@@ -23,6 +23,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,8 +56,14 @@ const (
 	// durable workspace volume into the new container, so it lives there.
 	DefaultStateDir = v1alpha1.DefaultWorkspacePath + "/.ax"
 	// ExitRecordFile, under the state directory, holds the task command's
-	// exit once the command has exited on its own.
+	// exit once the command has exited on its own. The task command can write
+	// this file too, so the runner checks it when it reads it.
 	ExitRecordFile = "command-exit.json"
+
+	// maxExitRecordSkew is how far in the future the finish time of an exit
+	// record can be. A resume can move the sandbox to a node whose clock is
+	// a little behind.
+	maxExitRecordSkew = time.Minute
 
 	// stopGracePeriod is how long a running task command gets to exit after
 	// SIGTERM before it is killed during shutdown.
@@ -80,10 +87,37 @@ func readExitRecord(dir string) (*ExitRecord, error) {
 		return nil, err
 	}
 	var rec ExitRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&rec); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", ExitRecordFile, err)
 	}
+	if dec.More() {
+		return nil, fmt.Errorf("parsing %s: data after the record", ExitRecordFile)
+	}
+	if err := rec.validate(time.Now()); err != nil {
+		return nil, fmt.Errorf("checking %s: %w", ExitRecordFile, err)
+	}
 	return &rec, nil
+}
+
+// validate rejects a record that the runner cannot have written. The record
+// is in the workspace volume, so the agent or a repository that it clones can
+// write it. The check stops a damaged record, not an agent that writes a
+// plausible one: the outcome is what the sandbox reports.
+func (r ExitRecord) validate(now time.Time) error {
+	// ProcessState.ExitCode is -1 for a command that a signal stopped, and
+	// 0 to 255 for a command that exited.
+	if r.ExitCode < -1 || r.ExitCode > 255 {
+		return fmt.Errorf("exit code %d is not in the range -1 to 255", r.ExitCode)
+	}
+	if r.FinishedAt.IsZero() {
+		return errors.New("no finish time")
+	}
+	if r.FinishedAt.After(now.Add(maxExitRecordSkew)) {
+		return fmt.Errorf("finish time %s is in the future", r.FinishedAt.Format(time.RFC3339))
+	}
+	return nil
 }
 
 // writeExitRecord stores rec in dir. It writes a temporary file, syncs it, and
@@ -242,8 +276,9 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	prev, err := readExitRecord(stateDir)
 	if err != nil {
-		// An unreadable record is not proof that the command ran, so run it.
-		slog.Error("reading the task command's exit record; starting the command", "dir", stateDir, "error", err)
+		// An unreadable or invalid record is not proof that the command
+		// ran, so ignore it and run the command.
+		slog.Error("ignoring the task command's exit record; starting the command", "dir", stateDir, "error", err)
 	}
 	if prev != nil {
 		metaServer.SetWorkspaceReady(true)

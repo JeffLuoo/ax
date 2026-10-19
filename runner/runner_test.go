@@ -454,6 +454,35 @@ func TestRun_StoppedCommandHasNoRecordAndStartsAgain(t *testing.T) {
 	waitRuns(2)
 }
 
+func TestRun_InvalidRecordStartsTheCommand(t *testing.T) {
+	// The agent, or a repository that it clones, can write the state
+	// directory, so the runner checks a record before it trusts it.
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	for name, body := range map[string]string{
+		"future finish time": `{"exitCode":0,"finishedAt":"` + future + `"}`,
+		"exit code too high": `{"exitCode":256,"finishedAt":"2026-10-18T08:30:00Z"}`,
+		"exit code too low":  `{"exitCode":-2,"finishedAt":"2026-10-18T08:30:00Z"}`,
+		"no finish time":     `{"exitCode":0}`,
+		"unknown field":      `{"exitCode":0,"finishedAt":"2026-10-18T08:30:00Z","outcome":"Completed"}`,
+		"null":               `null`,
+		"trailing data":      `{"exitCode":0,"finishedAt":"2026-10-18T08:30:00Z"}{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			if err := os.MkdirAll(h.cfg.StateDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(h.cfg.StateDir, runner.ExitRecordFile), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			h.task.Spec.Command = []string{"sh", "-c", "exit 3"}
+			if exit := h.runUntilCommandExits(t); exit.ExitCode != 3 {
+				t.Fatalf("exit = %+v, want the command to run and exit 3", exit)
+			}
+		})
+	}
+}
+
 func TestRun_UnreadableRecordStartsTheCommand(t *testing.T) {
 	h := newHarness(t)
 	if err := os.MkdirAll(h.cfg.StateDir, 0o755); err != nil {
