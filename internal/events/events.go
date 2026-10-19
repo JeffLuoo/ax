@@ -39,6 +39,10 @@ import (
 // EventName is the OTLP event name of a task lifecycle event.
 const EventName = "ax.task.state_changed"
 
+// OutcomeSourceSandbox is the outcome source of every outcome ax-server
+// reports: the task command's exit code.
+const OutcomeSourceSandbox = "sandbox"
+
 // PhaseDeleted is the phase of the event sent after a task's record is
 // removed. It is not a phase that a stored task can have.
 const PhaseDeleted = "Deleted"
@@ -54,8 +58,12 @@ const (
 	AttrPhase     = "ax.task.phase"
 	AttrOutcome   = "ax.task.outcome"
 	AttrExitCode  = "ax.task.exit_code"
-	AttrAteSpace  = "ate.atespace"
-	AttrActorName = "ate.actor.name"
+	// AttrOutcomeSource says who decided the outcome. ax-server's outcome is
+	// the runner's exit code, reported from inside the sandbox, so it is
+	// always "sandbox".
+	AttrOutcomeSource = "ax.task.outcome_source"
+	AttrAteSpace      = "ate.atespace"
+	AttrActorName     = "ate.actor.name"
 )
 
 // Emitter sends task lifecycle events. TaskChanged must not block on the
@@ -137,7 +145,7 @@ func Attributes(task *v1alpha1.Task) []attribute.KeyValue {
 	if atespace == "" {
 		atespace = "default"
 	}
-	return []attribute.KeyValue{
+	attrs := []attribute.KeyValue{
 		attribute.String(AttrAtespace, atespace),
 		attribute.String(AttrTaskName, meta.GetName()),
 		attribute.String(AttrParent, spec.GetParent()),
@@ -148,4 +156,8 @@ func Attributes(task *v1alpha1.Task) []attribute.KeyValue {
 		attribute.String(AttrAteSpace, atespace),
 		attribute.String(AttrActorName, meta.GetName()),
 	}
+	if st.GetOutcome() != "" {
+		attrs = append(attrs, attribute.String(AttrOutcomeSource, OutcomeSourceSandbox))
+	}
+	return attrs
 }

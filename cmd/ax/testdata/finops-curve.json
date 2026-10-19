@@ -60,7 +60,7 @@
         {
           "activeHours": 15,
           "variable": 0.601275,
-          "idleShare": 0.2961503731343282,
+          "idleShare": 0.29615037313432824,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 1.0574253731343284,
@@ -78,7 +78,7 @@
         {
           "activeHours": 30,
           "variable": 1.20255,
-          "idleShare": 0.5923007462686564,
+          "idleShare": 0.5923007462686565,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 1.9548507462686566,
@@ -87,7 +87,7 @@
         {
           "activeHours": 50,
           "variable": 2.0042500000000003,
-          "idleShare": 0.9871679104477613,
+          "idleShare": 0.9871679104477611,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 3.1514179104477615,
@@ -96,7 +96,7 @@
         {
           "activeHours": 100,
           "variable": 4.008500000000001,
-          "idleShare": 1.9743358208955226,
+          "idleShare": 1.9743358208955222,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 6.142835820895522,
@@ -105,7 +105,7 @@
         {
           "activeHours": 200,
           "variable": 8.017000000000001,
-          "idleShare": 3.9486716417910452,
+          "idleShare": 3.9486716417910444,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 12.125671641791046,
@@ -187,7 +187,7 @@
         {
           "activeHours": 15,
           "variable": 0.378795,
-          "idleShare": 0.186570671641791,
+          "idleShare": 0.18657067164179097,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 0.725365671641791,
@@ -205,7 +205,7 @@
         {
           "activeHours": 30,
           "variable": 0.75759,
-          "idleShare": 0.373141343283582,
+          "idleShare": 0.37314134328358195,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 1.290731343283582,
@@ -241,7 +241,7 @@
         {
           "activeHours": 365,
           "variable": 9.217345,
-          "idleShare": 4.539886343283581,
+          "idleShare": 4.53988634328358,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 13.91723134328358,
@@ -250,7 +250,7 @@
         {
           "activeHours": 730,
           "variable": 18.43469,
-          "idleShare": 9.079772686567162,
+          "idleShare": 9.07977268656716,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 27.67446268656716,
@@ -368,7 +368,7 @@
         {
           "activeHours": 365,
           "variable": 4.389125,
-          "idleShare": 2.1618078358208943,
+          "idleShare": 2.1618078358208948,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 6.710932835820894,
@@ -377,7 +377,7 @@
         {
           "activeHours": 730,
           "variable": 8.77825,
-          "idleShare": 4.323615671641789,
+          "idleShare": 4.3236156716417895,
           "storage": 0.06,
           "platform": 0.1,
           "fullyLoaded": 13.26186567164179,

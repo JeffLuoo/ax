@@ -732,7 +732,7 @@ func runDescribe(serverURL, atespace, finopsServer, kubeContext string, args []s
 		if f := task.GetStatus().GetFinishedAt(); f != nil {
 			finished = ", finished " + f.AsTime().UTC().Format(time.RFC3339)
 		}
-		fmt.Printf("Outcome:      %s (exit code %d%s)\n", outcome, task.GetStatus().GetExitCode(), finished)
+		fmt.Printf("Outcome:      %s (self-reported: exit code %d%s)\n", outcome, task.GetStatus().GetExitCode(), finished)
 	}
 	if task.Spec != nil {
 		if refs := task.Spec.WorkspaceRefs(); len(refs) > 0 {

@@ -165,6 +165,10 @@ type TaskCost struct {
 	TreeOverBudget bool    `json:"treeOverBudget" yaml:"treeOverBudget"`
 	Outcome        string  `json:"outcome,omitempty" yaml:"outcome,omitempty"`
 	ExitCode       *int32  `json:"exitCode,omitempty" yaml:"exitCode,omitempty"`
+	// OutcomeSource says who decided Outcome: "sandbox" (the task's own exit
+	// code, so self-reported), "orchestrator", or "external". Servers before
+	// it existed send none; treat that as "sandbox".
+	OutcomeSource string `json:"outcomeSource,omitempty" yaml:"outcomeSource,omitempty"`
 }
 
 // OutcomeTotals is the cost of the actors whose tasks had one outcome.
@@ -181,6 +185,9 @@ type OutcomeCosts struct {
 	Failed     OutcomeTotals `json:"failed" yaml:"failed"`
 	Unfinished OutcomeTotals `json:"unfinished" yaml:"unfinished"`
 	NoTask     OutcomeTotals `json:"noTask" yaml:"noTask"`
+	// OutcomeSource is "sandbox" when any Completed or Failed outcome is
+	// self-reported, else the one source they share, else "mixed".
+	OutcomeSource string `json:"outcomeSource,omitempty" yaml:"outcomeSource,omitempty"`
 }
 
 // VariableHostingUSD returns the variable hosting cost (booked compute + storage + egress).

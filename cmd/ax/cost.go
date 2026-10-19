@@ -280,9 +280,11 @@ func lookupAXTask(ctx context.Context, axServerURL, atespace, name string) *v1al
 // record when it is reachable, else what FinOps reports.
 type taskView struct {
 	name, parent, phase, outcome string
-	budgetUSD                    float64
-	exitCode                     *int32
-	finishedAt                   string
+	// outcomeSource is FinOps' outcomeSource; "" reads as "sandbox".
+	outcomeSource string
+	budgetUSD     float64
+	exitCode      *int32
+	finishedAt    string
 }
 
 func viewTask(a *finops.ActorCost, task *v1alpha1.Task) *taskView {
@@ -301,10 +303,15 @@ func viewTask(a *finops.ActorCost, task *v1alpha1.Task) *taskView {
 			if f := task.GetStatus().GetFinishedAt(); f != nil {
 				v.finishedAt = f.AsTime().UTC().Format(time.RFC3339)
 			}
+			// ax-server's outcome is the runner's exit code; FinOps may know
+			// of outside evidence for the same outcome.
+			if a != nil && a.Task != nil && a.Task.Outcome == v.outcome {
+				v.outcomeSource = a.Task.OutcomeSource
+			}
 		}
 		return v
 	case a != nil && a.Task != nil:
-		return &taskView{name: a.Task.Name, parent: a.Task.Parent, outcome: a.Task.Outcome, budgetUSD: a.Task.BudgetUSD, exitCode: a.Task.ExitCode}
+		return &taskView{name: a.Task.Name, parent: a.Task.Parent, outcome: a.Task.Outcome, outcomeSource: a.Task.OutcomeSource, budgetUSD: a.Task.BudgetUSD, exitCode: a.Task.ExitCode}
 	}
 	return nil
 }
@@ -417,7 +424,8 @@ func renderCostList(out io.Writer, report *finops.CostReport, scope string, task
 		fmt.Fprintf(out, "\nSummary (%s, %d rows): the server did not filter by atespace, so it sent no totals for this atespace\n", scopeLabel, len(rows))
 	}
 	if oc := report.OutcomeCosts; oc != nil {
-		fmt.Fprintf(out, "By task outcome (own LLM + compute): completed=%s (%d tasks) failed=%s (%d tasks) unfinished=%s (%d tasks) no-task=%s\n",
+		fmt.Fprintf(out, "By task outcome (%s): completed=%s (%d tasks) failed=%s (%d tasks) unfinished=%s (%d tasks) no-task=%s (own LLM + compute)\n",
+			outcomeEvidence(oc.OutcomeSource),
 			formatUSD(oc.Completed.TotalCost.USD()), oc.Completed.Tasks,
 			formatUSD(oc.Failed.TotalCost.USD()), oc.Failed.Tasks,
 			formatUSD(oc.Unfinished.TotalCost.USD()), oc.Unfinished.Tasks,
@@ -551,6 +559,16 @@ func renderActorDetail(out io.Writer, m *finops.ActorMatch, task *v1alpha1.Task,
 	return nil
 }
 
+// outcomeEvidence labels a task outcome by who decided it. The runner's exit
+// code comes from inside the sandbox, so an outcome with no outside evidence
+// (or from a server that predates outcomeSource) is self-reported.
+func outcomeEvidence(source string) string {
+	if source == "" || source == "sandbox" {
+		return "self-reported"
+	}
+	return "evidence: " + source
+}
+
 // printTaskBudget prints the task's place in the tree, its outcome, and its
 // spend (LLM plus compute) against its budget.
 func printTaskBudget(out io.Writer, a *finops.ActorCost, v *taskView) {
@@ -566,9 +584,9 @@ func printTaskBudget(out io.Writer, a *finops.ActorCost, v *taskView) {
 		if v.finishedAt != "" {
 			finished = ", finished " + v.finishedAt
 		}
-		fmt.Fprintf(out, "Outcome:            %s (exit code %d%s)\n", v.outcome, *v.exitCode, finished)
+		fmt.Fprintf(out, "Outcome:            %s (%s: exit code %d%s)\n", v.outcome, outcomeEvidence(v.outcomeSource), *v.exitCode, finished)
 	case v.outcome != "":
-		fmt.Fprintf(out, "Outcome:            %s\n", v.outcome)
+		fmt.Fprintf(out, "Outcome:            %s (%s)\n", v.outcome, outcomeEvidence(v.outcomeSource))
 	default:
 		fmt.Fprintf(out, "Outcome:            - (the command has not exited)\n")
 	}

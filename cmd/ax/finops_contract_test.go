@@ -28,12 +28,12 @@ import (
 )
 
 // The files testdata/finops-*.json and finops-focus.csv are the responses of
-// a real finops server (github.com/JeffLuoo/finops, branch fix/top5 at
-// dd7d851) after it took two ax.task.state_changed events from this repo's
-// internal/events emitter and nine Substrate lifecycle events for the actors
-// team-a/root and team-a/child. Regenerate them whenever the finops HTTP API
-// changes, and at least once after the finops top-five changes merge, so that
-// this test checks the CLI against the server that ships.
+// a real finops server (github.com/JeffLuoo/finops, main at 990203b) after it
+// took two ax.task.state_changed events with this repo's internal/events
+// attributes (including ax.task.outcome_source) and nine Substrate lifecycle
+// events for the actors team-a/root and team-a/child. Regenerate them whenever
+// the finops HTTP API changes, so that this test checks the CLI against the
+// server that ships.
 
 func readGolden(t *testing.T, name string) []byte {
 	t.Helper()
@@ -76,7 +76,8 @@ func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
 		byName[a.Name] = a
 	}
 	child := byName["child"]
-	if child.ParentAgentID != "team-a/root" || child.Task == nil || child.Task.Outcome != "Failed" || child.Task.ExitCode == nil || *child.Task.ExitCode != 3 || !child.Task.OverBudget {
+	if child.ParentAgentID != "team-a/root" || child.Task == nil || child.Task.Outcome != "Failed" || child.Task.ExitCode == nil || *child.Task.ExitCode != 3 || !child.Task.OverBudget ||
+		child.Task.OutcomeSource != "sandbox" || report.OutcomeCosts.OutcomeSource != "sandbox" {
 		t.Errorf("child row = %+v, task %+v", child, child.Task)
 	}
 	if child.Compute.Cost.USD() <= 0 || child.TotalCost.USD() <= 0 {
@@ -113,7 +114,7 @@ func TestFinOpsContract_CLIRendersTheGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"child", "root", "OUTCOME", "Failed", "Completed", "OVER", "Summary (atespace team-a, 2 rows)", "Cost basis: ESTIMATE — NOT RECONCILED", "By task outcome"} {
+	for _, want := range []string{"child", "root", "OUTCOME", "Failed", "Completed", "OVER", "Summary (atespace team-a, 2 rows)", "Cost basis: ESTIMATE — NOT RECONCILED", "By task outcome (self-reported): "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list output lacks %q:\n%s", want, out)
 		}
@@ -123,7 +124,7 @@ func TestFinOpsContract_CLIRendersTheGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Parent Task:        root", "Outcome:            Failed (exit code 3)", "Budget:             $0.010000", "OVER BUDGET", "Parent Agent:       team-a/root"} {
+	for _, want := range []string{"Parent Task:        root", "Outcome:            Failed (self-reported: exit code 3)", "Budget:             $0.010000", "OVER BUDGET", "Parent Agent:       team-a/root"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("detail output lacks %q:\n%s", want, out)
 		}

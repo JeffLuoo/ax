@@ -86,7 +86,8 @@ func TestCostList_LabelsEstimatesAndWarnsAboutLeftOutSpend(t *testing.T) {
 		"$0.600000/$0.500000 OVER",
 		"Summary (all atespaces, 2 rows): calls=9",
 		"total=$0.750000 fully_loaded=$0.900000",
-		"By task outcome (own LLM + compute): completed=$0.000000 (0 tasks) failed=$0.600000 (1 tasks)",
+		// A server with no outcomeSource predates it: its outcomes are the exit code.
+		"By task outcome (self-reported): completed=$0.000000 (0 tasks) failed=$0.600000 (1 tasks)",
 		"Cost basis: ESTIMATE — NOT RECONCILED",
 		"Warning: these numbers leave out spend: 3 calls with unknown cost (no usage report); 2 calls with no price; 1 leases with no price; usage status missing=2 truncated=1; unknown actor: 4 calls, $0.150000",
 	} {
@@ -194,7 +195,7 @@ func TestCostTask_ShowsBudgetSpendAndOutcome(t *testing.T) {
 	for _, want := range []string{
 		"Task Phase:         Running",
 		"Parent Task:        planner",
-		"Outcome:            Failed (exit code 3, finished 2026-10-18T08:30:00Z)",
+		"Outcome:            Failed (self-reported: exit code 3, finished 2026-10-18T08:30:00Z)",
 		"Budget:             $0.500000",
 		"Spend (LLM+compute): own $0.600000 (120.0% of budget), tree $0.000000 (0.0%)  OVER BUDGET",
 		"Cost basis: ESTIMATE — NOT RECONCILED",
@@ -209,7 +210,7 @@ func TestCostTask_ShowsBudgetSpendAndOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Outcome:            Failed (exit code 3)", "Budget:             $0.500000", "OVER BUDGET"} {
+	for _, want := range []string{"Outcome:            Failed (self-reported: exit code 3)", "Budget:             $0.500000", "OVER BUDGET"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("fallback output lacks %q:\n%s", want, out)
 		}
@@ -366,5 +367,34 @@ func TestResolveOptionalFinOpsURL_UsesOnlyTheContextsTunnel(t *testing.T) {
 	}
 	if got := resolveOptionalFinOpsURL("http://explicit:9090", "prod"); got != "http://explicit:9090" {
 		t.Errorf("an explicit --finops-server was not used: %q", got)
+	}
+}
+
+// An outcome that something outside the sandbox checked names its evidence;
+// one the sandbox reported is labeled self-reported.
+func TestCost_OutcomeEvidence(t *testing.T) {
+	external := strings.Replace(warningReport, `"outcome": "Failed", "exitCode": 3}`, `"outcome": "Failed", "exitCode": 3, "outcomeSource": "external"}`, 1)
+	external = strings.Replace(external, `"noTask": {"actors": 1, "totalCost": {"USD": 0.15}}}`, `"noTask": {"actors": 1, "totalCost": {"USD": 0.15}}, "outcomeSource": "external"}`, 1)
+	sandbox := strings.ReplaceAll(external, `"outcomeSource": "external"`, `"outcomeSource": "sandbox"`)
+	if external == warningReport {
+		t.Fatal("fixture did not change")
+	}
+	for _, tc := range []struct {
+		name, report, list, detail string
+	}{
+		{"external", external, "By task outcome (evidence: external): ", "Outcome:            Failed (evidence: external: exit code 3)"},
+		{"sandbox", sandbox, "By task outcome (self-reported): ", "Outcome:            Failed (self-reported: exit code 3)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := rawServer(t, map[string]string{"/v1/costs": tc.report})
+			out, err := captureStdout(t, func() error { return runCost(srv.URL, "", "default", false, []string{"-A"}) })
+			if err != nil || !strings.Contains(out, tc.list) {
+				t.Errorf("list output lacks %q (%v):\n%s", tc.list, err, out)
+			}
+			out, err = captureStdout(t, func() error { return runCost(srv.URL, "", "team-a", true, []string{"task", "agent-1"}) })
+			if err != nil || !strings.Contains(out, tc.detail) {
+				t.Errorf("detail output lacks %q (%v):\n%s", tc.detail, err, out)
+			}
+		})
 	}
 }

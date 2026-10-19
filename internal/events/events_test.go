@@ -148,6 +148,8 @@ func TestNewFromEnv_SendsEventOverOTLP(t *testing.T) {
 		"ax.task.exit_code":  int64(3),
 		"ate.atespace":       "team-a",
 		"ate.actor.name":     "child",
+		// The outcome is the runner's exit code, from inside the sandbox.
+		"ax.task.outcome_source": "sandbox",
 	}
 	got := records[0]
 	if len(got) != len(want) {
@@ -170,5 +172,8 @@ func TestAttributes_RootTaskWithoutBudget(t *testing.T) {
 	}
 	if attrs[events.AttrParent] != "" || attrs[events.AttrBudgetUSD] != "0" || attrs[events.AttrOutcome] != "" {
 		t.Errorf("root task attributes = %v", attrs)
+	}
+	if _, ok := attrs[events.AttrOutcomeSource]; ok {
+		t.Errorf("outcome source without an outcome: %v", attrs)
 	}
 }
