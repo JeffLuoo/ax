@@ -130,6 +130,14 @@ message TaskStatus {
   int32 exit_code = 9;
   // finished_at is when the task command exited.
   google.protobuf.Timestamp finished_at = 10;
+  // created_by is the verified principal that created the task: the
+  // username that a TokenReview returned for the caller's token. It is
+  // empty when ax-server runs without authentication.
+  string created_by = 11;
+  // parent_id is the unique ID (status.id) of the parent task when this task
+  // was created. A parent made again under the same name has another ID, so
+  // it does not adopt the old children.
+  string parent_id = 12;
 }
 
 message Condition {

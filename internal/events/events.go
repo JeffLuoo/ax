@@ -58,6 +58,15 @@ const (
 	AttrPhase     = "ax.task.phase"
 	AttrOutcome   = "ax.task.outcome"
 	AttrExitCode  = "ax.task.exit_code"
+	// AttrTaskID is the task's unique ID (status.id). Two tasks with the same
+	// name have different IDs.
+	AttrTaskID = "ax.task.id"
+	// AttrParentID is the parent's ID at create time (status.parent_id).
+	// Unlike AttrParent, it does not move to a new parent with the same name.
+	AttrParentID = "ax.task.parent_id"
+	// AttrCreatedBy is the verified principal that created the task
+	// (status.created_by), or "" when ax-server runs without authentication.
+	AttrCreatedBy = "ax.task.created_by"
 	// AttrOutcomeSource says who decided the outcome. ax-server's outcome is
 	// the runner's exit code, reported from inside the sandbox, so it is
 	// always "sandbox".
@@ -149,6 +158,9 @@ func Attributes(task *v1alpha1.Task) []attribute.KeyValue {
 		attribute.String(AttrAtespace, atespace),
 		attribute.String(AttrTaskName, meta.GetName()),
 		attribute.String(AttrParent, spec.GetParent()),
+		attribute.String(AttrTaskID, st.GetId()),
+		attribute.String(AttrParentID, st.GetParentId()),
+		attribute.String(AttrCreatedBy, st.GetCreatedBy()),
 		attribute.Float64(AttrBudgetUSD, spec.GetBudget().GetMaxUsd()),
 		attribute.String(AttrPhase, st.GetPhase()),
 		attribute.String(AttrOutcome, st.GetOutcome()),

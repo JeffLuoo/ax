@@ -561,7 +561,15 @@ type TaskStatus struct {
 	// exit_code is the exit status of the task command when outcome is set.
 	ExitCode int32 `protobuf:"varint,9,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	// finished_at is when the task command exited.
-	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	FinishedAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	// created_by is the verified principal that created the task: the
+	// username that a TokenReview returned for the caller's token. It is
+	// empty when ax-server runs without authentication.
+	CreatedBy string `protobuf:"bytes,11,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	// parent_id is the unique ID (status.id) of the parent task when this task
+	// was created. A parent made again under the same name has another ID, so
+	// it does not adopt the old children.
+	ParentId      string `protobuf:"bytes,12,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -650,6 +658,20 @@ func (x *TaskStatus) GetFinishedAt() *timestamppb.Timestamp {
 		return x.FinishedAt
 	}
 	return nil
+}
+
+func (x *TaskStatus) GetCreatedBy() string {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return ""
+}
+
+func (x *TaskStatus) GetParentId() string {
+	if x != nil {
+		return x.ParentId
+	}
+	return ""
 }
 
 type Condition struct {
@@ -2568,7 +2590,7 @@ const file_pkg_apis_v1alpha1_ax_proto_rawDesc = "" +
 	"\fWorkspaceRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
-	"\x04goal\x18\x03 \x01(\tR\x04goal\"\x91\x02\n" +
+	"\x04goal\x18\x03 \x01(\tR\x04goal\"\xcd\x02\n" +
 	"\n" +
 	"TaskStatus\x12\x14\n" +
 	"\x05phase\x18\x01 \x01(\tR\x05phase\x12\x0e\n" +
@@ -2582,7 +2604,10 @@ const file_pkg_apis_v1alpha1_ax_proto_rawDesc = "" +
 	"\texit_code\x18\t \x01(\x05R\bexitCode\x12;\n" +
 	"\vfinished_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"finishedAt\"\xa6\x01\n" +
+	"finishedAt\x12\x1d\n" +
+	"\n" +
+	"created_by\x18\v \x01(\tR\tcreatedBy\x12\x1b\n" +
+	"\tparent_id\x18\f \x01(\tR\bparentId\"\xa6\x01\n" +
 	"\tCondition\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12;\n" +

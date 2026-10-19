@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestServerHealthzHTTP(t *testing.T) {
@@ -834,6 +835,104 @@ func TestCreateTask_ParentRules(t *testing.T) {
 	}})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("negative budget: got %v, want InvalidArgument", err)
+	}
+}
+
+// TestCreateTask_DropsCallerStatus checks that a caller cannot set the
+// status on create: an outcome, an exit code, a finish time, a creator, or IDs
+// from the request do not reach the store.
+func TestCreateTask_DropsCallerStatus(t *testing.T) {
+	ms := memory.NewStore()
+	srv := server.NewServer(ms)
+	ctx := context.Background()
+	_, err := srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "forged", Atespace: "team-a"},
+		Spec:     &v1alpha1.TaskSpec{},
+		Status: &v1alpha1.TaskStatus{
+			Phase:      "Completed",
+			Outcome:    v1alpha1.OutcomeCompleted,
+			ExitCode:   0,
+			FinishedAt: timestamppb.Now(),
+			Id:         "task-someone-else",
+			CreatedBy:  "mallory@example.com",
+			ParentId:   "task-root-1-forged",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	got, err := ms.GetTask(context.Background(), "team-a", "forged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := got.GetStatus()
+	if st.GetPhase() != "Suspended" || st.GetOutcome() != "" || st.GetFinishedAt() != nil {
+		t.Errorf("stored status = %v, want phase Suspended and no outcome or finish time", st)
+	}
+	if st.GetCreatedBy() != "" {
+		t.Errorf("created_by = %q, want none without authentication", st.GetCreatedBy())
+	}
+	if st.GetParentId() != "" || st.GetId() == "" || st.GetId() == "task-someone-else" {
+		t.Errorf("id = %q, parent_id = %q, want a server ID and no parent ID", st.GetId(), st.GetParentId())
+	}
+
+	// A forged exit code is dropped too.
+	_, err = srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "forged-exit", Atespace: "team-a"},
+		Spec:     &v1alpha1.TaskSpec{},
+		Status:   &v1alpha1.TaskStatus{Outcome: v1alpha1.OutcomeFailed, ExitCode: 7},
+	}})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	got, _ = ms.GetTask(context.Background(), "team-a", "forged-exit")
+	if got.GetStatus().GetExitCode() != 0 || got.GetStatus().GetOutcome() != "" {
+		t.Errorf("stored status = %v, want no exit code or outcome", got.GetStatus())
+	}
+}
+
+// TestCreateTask_ParentIDSurvivesParentRecreate checks that a child keeps the
+// unique ID of the parent it was created under. A new parent with the same name
+// gets another ID, so it does not adopt the old children.
+func TestCreateTask_ParentIDSurvivesParentRecreate(t *testing.T) {
+	ms := memory.NewStore()
+	srv := server.NewServer(ms)
+	ctx := context.Background()
+	create := func(name, parent string) *v1alpha1.Task {
+		t.Helper()
+		task, err := srv.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &v1alpha1.Task{
+			Metadata: &v1alpha1.ObjectMeta{Name: name, Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Parent: parent},
+		}})
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		return task
+	}
+
+	oldRoot := create("root", "")
+	oldChild := create("child", "root")
+	if oldChild.GetStatus().GetParentId() != oldRoot.GetStatus().GetId() || oldRoot.GetStatus().GetId() == "" {
+		t.Fatalf("child parent_id = %q, want the root's id %q", oldChild.GetStatus().GetParentId(), oldRoot.GetStatus().GetId())
+	}
+
+	if _, err := srv.DeleteTask(ctx, &v1alpha1.DeleteTaskRequest{Atespace: "team-a", Name: "root"}); err != nil {
+		t.Fatalf("delete root: %v", err)
+	}
+	newRoot := create("root", "")
+	if newRoot.GetStatus().GetId() == oldRoot.GetStatus().GetId() {
+		t.Fatalf("the re-created root has the old id %q", newRoot.GetStatus().GetId())
+	}
+	newChild := create("child-2", "root")
+	if newChild.GetStatus().GetParentId() != newRoot.GetStatus().GetId() {
+		t.Errorf("new child parent_id = %q, want the new root's id %q", newChild.GetStatus().GetParentId(), newRoot.GetStatus().GetId())
+	}
+	stored, err := ms.GetTask(ctx, "team-a", "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.GetStatus().GetParentId() != oldRoot.GetStatus().GetId() {
+		t.Errorf("old child parent_id = %q, want the old root's id %q", stored.GetStatus().GetParentId(), oldRoot.GetStatus().GetId())
 	}
 }
 

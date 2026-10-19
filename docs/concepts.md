@@ -25,6 +25,9 @@ When the task command exits, the runner records the exit status on the durable v
 
 `spec.parent` names the task that started this task, and it must be in the same atespace. The parent links make a task tree, which Agent FinOps uses to add the cost of each sub-task to the cost of its parent. `spec.budget.maxUsd` is the spending limit that the task declares. `ax-server` sends the parent, the budget, the phase, and the outcome to Agent FinOps as `ax.task.state_changed` events when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
+When `ax-server` creates a task, it sets `status.id` to a unique ID and `status.parentId` to the `status.id` of the parent at that time. If you delete a parent and create a new task with the same name, the new task has a different ID, so it does not adopt the children of the old parent. With authentication on, `ax-server` also sets `status.createdBy` to the verified name of the caller. The events carry these values as `ax.task.id`, `ax.task.parent_id`, and `ax.task.created_by`.
+
+
 ## Workspace
 
 Getting an agent to the point where it can start working is tedious. Before the first useful action it needs its data sources in place, such as repositories cloned at the right revision or buckets mounted, the tools it is allowed to call, and the skills it should bring along. Every task that needs the same environment repeats that setup, and every agent framework reinvents it. A `Workspace` exists to make that work declarative and done once.

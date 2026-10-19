@@ -16,10 +16,14 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/lock"
@@ -106,6 +110,15 @@ func (s *Server) Handler() http.Handler {
 	})
 }
 
+// newTaskID returns a unique ID for a new task. The random part makes the IDs
+// of two tasks with the same name different, also when they are created in the
+// same second.
+func newTaskID(name string) string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("task-%s-%d-%s", name, time.Now().Unix(), hex.EncodeToString(b))
+}
+
 // --- gRPC AXServer implementation ---
 
 // --- Tasks ---
@@ -153,6 +166,9 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 		return nil, status.Error(codes.InvalidArgument, "task required")
 	}
 	task := req.Task
+	// The server owns the status. A caller cannot set an outcome, an exit
+	// code, or a parent ID on create.
+	task.Status = nil
 	if err := v1alpha1.ValidateTask(task); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -186,6 +202,7 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 
 	// A parent is always in the task's own atespace, so a task tree never
 	// crosses an atespace and cost rollups cannot move cost to another tenant.
+	var parentID string
 	if parent := task.GetSpec().GetParent(); parent != "" {
 		p, err := s.store.GetTask(ctx, atespace, parent)
 		if errors.Is(err, store.ErrNotFound) {
@@ -197,13 +214,16 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 		if p.GetStatus().GetPhase() == v1alpha1.PhaseTerminating {
 			return nil, status.Errorf(codes.FailedPrecondition, "parent task %s/%s is being deleted", atespace, parent)
 		}
+		parentID = p.GetStatus().GetId()
 	}
 
 	if task.Metadata.CreateTime == nil {
 		task.Metadata.CreateTime = timestamppb.Now()
 	}
 	if task.Status == nil {
-		task.Status = &v1alpha1.TaskStatus{}
+		// A new task. A retry of a Pending create keeps the status of the
+		// first attempt.
+		task.Status = &v1alpha1.TaskStatus{Id: newTaskID(taskName), ParentId: parentID}
 	}
 	task.Status.Phase = "Suspended"
 	if err := s.store.SaveTask(ctx, task); err != nil {

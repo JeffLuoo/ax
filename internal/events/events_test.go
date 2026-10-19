@@ -33,7 +33,8 @@ func task() *v1alpha1.Task {
 	return &v1alpha1.Task{
 		Metadata: &v1alpha1.ObjectMeta{Name: "child", Atespace: "team-a"},
 		Spec:     &v1alpha1.TaskSpec{Parent: "root", Budget: &v1alpha1.Budget{MaxUsd: 2.5}},
-		Status:   &v1alpha1.TaskStatus{Phase: "Running", Outcome: v1alpha1.OutcomeFailed, ExitCode: 3},
+		Status: &v1alpha1.TaskStatus{Phase: "Running", Outcome: v1alpha1.OutcomeFailed, ExitCode: 3,
+			Id: "task-child-1-ab", ParentId: "task-root-1-cd", CreatedBy: "alice@example.com"},
 	}
 }
 
@@ -142,6 +143,9 @@ func TestNewFromEnv_SendsEventOverOTLP(t *testing.T) {
 		"ax.atespace":        "team-a",
 		"ax.task.name":       "child",
 		"ax.task.parent":     "root",
+		"ax.task.id":         "task-child-1-ab",
+		"ax.task.parent_id":  "task-root-1-cd",
+		"ax.task.created_by": "alice@example.com",
 		"ax.task.budget_usd": 2.5,
 		"ax.task.phase":      "Running",
 		"ax.task.outcome":    "Failed",

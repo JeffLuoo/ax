@@ -53,6 +53,14 @@ spec:
 
 After the task command exits, `status.outcome` is `Completed` (exit status 0) or `Failed` (any other status), with `status.exitCode` and `status.finishedAt`. The runner in the sandbox reports the exit, so the outcome is what the sandbox says. The runner keeps the exit on the durable volume and does not start the command again after a resume.
 
+### Status
+
+`ax-server` owns `status`. It ignores a `status` in the manifest that you apply, so you cannot set an outcome, an exit code, or a finish time. On create, it sets these fields:
+
+- `status.id`: a unique ID for the task. A new task with the name of a deleted task has a different ID.
+- `status.parentId`: the `status.id` of the task that `spec.parent` names, at the time of the create.
+- `status.createdBy`: the verified name of the caller, from a Kubernetes TokenReview. It is empty when `ax-server` runs with `--auth=false`.
+
 ### Binding several workspaces
 
 `spec.workspaces` takes as many entries as you like, so a task can compose reusable `Workspace` resources, for example the code to work on plus a shared set of tools:
