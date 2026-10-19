@@ -19,7 +19,7 @@ The unit is deliberately small. An agent is not one process that runs to complet
 
 Two transitions are worth knowing. Suspending a task sets `Ready` to False with reason `TaskSuspended`; resuming sets it back. Deleting a task tears down the sandbox on Agent Substrate and removes the record. `ax delete` blocks until that has completed.
 
-When the task command exits, the runner records the exit status on the durable volume and serves it at `GET /statusz`. `ax-server` reads it through the atenet router for each running task that has no outcome, and sets `status.outcome` to `Completed` or `Failed`, with `status.exitCode` and `status.finishedAt`. The runner does not start the command again after a resume, so a command that completed does not run a second time. The outcome comes from inside the sandbox, so treat it as what the agent reports.
+When the task command exits, the runner records the exit status on the durable volume and serves it at `GET /statusz`. `ax-server` reads it through the atenet router for each running task that has no outcome, and sets `status.outcome` to `Completed` or `Failed`, with `status.exitCode` and `status.finishedAt`. It reads `/statusz` every 15 seconds (`--outcome-poll-interval`). A suspend or a delete of a running task without an outcome also reads `/statusz` once, with a two-second limit, before it acts, so a command that exited after the last read keeps its outcome. If the runner does not answer in time, the suspend or the delete continues without an outcome. The runner does not start the command again after a resume, so a command that completed does not run a second time. The outcome comes from inside the sandbox, so treat it as what the agent reports.
 
 ### Task tree and budget
 

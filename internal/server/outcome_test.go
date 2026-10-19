@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/lock"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store/memory"
@@ -252,4 +253,109 @@ func TestRunOutcomePoller_StopsWithContext(t *testing.T) {
 	}
 	// Without a router address it returns at once.
 	srv.RunOutcomePoller(context.Background(), server.OutcomePollerOptions{})
+}
+
+func TestSuspendAndDelete_RecordTheOutcomeBeforeTheyAct(t *testing.T) {
+	ms := memory.NewStore()
+	saveTask(t, ms, "team-a", "quick", "Running", "")
+	saveTask(t, ms, "team-a", "brief", "Running", "")
+	saveTask(t, ms, "team-a", "busy", "Running", "")
+	saveTask(t, ms, "team-a", "asleep", "Suspended", "")
+	saveTask(t, ms, "team-a", "unknown", "Running", "")
+	router := &fakeRouter{states: map[string]string{
+		"team-a/quick":  `{"state":"exited","exitCode":4,"finishedAt":"2026-10-18T08:30:00Z"}`,
+		"team-a/brief":  `{"state":"exited","exitCode":0,"finishedAt":"2026-10-18T08:31:00Z"}`,
+		"team-a/busy":   `{"state":"running"}`,
+		"team-a/asleep": `{"state":"exited","exitCode":0,"finishedAt":"2026-10-18T08:32:00Z"}`,
+	}}
+	hs := httptest.NewServer(router)
+	defer hs.Close()
+	rec := &recordingEmitter{}
+	srv := server.NewServer(ms, server.Options{Events: rec, RouterAddr: strings.TrimPrefix(hs.URL, "http://")})
+	ctx := context.Background()
+
+	// A command that exited before the suspend keeps its outcome.
+	got, err := srv.SuspendTask(ctx, &v1alpha1.SuspendTaskRequest{Atespace: "team-a", Name: "quick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := got.GetStatus(); st.GetPhase() != "Suspended" || st.GetOutcome() != v1alpha1.OutcomeFailed || st.GetExitCode() != 4 || st.GetFinishedAt().AsTime().Format(time.RFC3339) != "2026-10-18T08:30:00Z" {
+		t.Errorf("suspended task status = %v, want Suspended with outcome Failed exit 4", st)
+	}
+	if stored, _ := ms.GetTask(ctx, "team-a", "quick"); stored.GetStatus().GetOutcome() != v1alpha1.OutcomeFailed {
+		t.Errorf("stored status = %v, want outcome Failed", stored.GetStatus())
+	}
+
+	// A command that exited before the delete: the delete events carry the
+	// outcome.
+	if _, err := srv.DeleteTask(ctx, &v1alpha1.DeleteTaskRequest{Atespace: "team-a", Name: "brief"}); err != nil {
+		t.Fatal(err)
+	}
+	var deleted *v1alpha1.Task
+	for _, e := range rec.events {
+		if e.GetMetadata().GetName() == "brief" && e.GetStatus().GetPhase() == events.PhaseDeleted {
+			deleted = e
+		}
+	}
+	if deleted.GetStatus().GetOutcome() != v1alpha1.OutcomeCompleted || deleted.GetStatus().GetExitCode() != 0 {
+		t.Errorf("delete event = %v, want outcome Completed", deleted.GetStatus())
+	}
+
+	// A command that still runs, and a runner that does not answer, do not
+	// stop the suspend and set no outcome.
+	for _, name := range []string{"busy", "unknown"} {
+		got, err := srv.SuspendTask(ctx, &v1alpha1.SuspendTaskRequest{Atespace: "team-a", Name: name})
+		if err != nil {
+			t.Fatalf("suspend %s: %v", name, err)
+		}
+		if got.GetStatus().GetPhase() != "Suspended" || got.GetStatus().GetOutcome() != "" {
+			t.Errorf("%s status = %v, want Suspended with no outcome", name, got.GetStatus())
+		}
+	}
+
+	// The router resumes a suspended actor to answer, so a task that is not
+	// Running is not asked.
+	if _, err := srv.DeleteTask(ctx, &v1alpha1.DeleteTaskRequest{Atespace: "team-a", Name: "asleep"}); err != nil {
+		t.Fatal(err)
+	}
+	if router.askedFor("team-a/asleep") {
+		t.Error("the delete asked the router about a suspended task")
+	}
+}
+
+func TestSuspend_WithoutARouterDoesNotAsk(t *testing.T) {
+	ms := memory.NewStore()
+	saveTask(t, ms, "default", "t", "Running", "")
+	srv := server.NewServer(ms)
+	got, err := srv.SuspendTask(context.Background(), &v1alpha1.SuspendTaskRequest{Name: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetStatus().GetPhase() != "Suspended" || got.GetStatus().GetOutcome() != "" {
+		t.Errorf("status = %v", got.GetStatus())
+	}
+}
+
+func TestSuspend_DoesNotWaitLongForASlowRunner(t *testing.T) {
+	ms := memory.NewStore()
+	saveTask(t, ms, "default", "slow", "Running", "")
+	router := &fakeRouter{states: map[string]string{
+		"default/slow": `{"state":"exited","exitCode":0}`,
+	}, delay: 3 * time.Second}
+	hs := httptest.NewServer(router)
+	defer hs.Close()
+	// A client without its own timeout: only the check's bound applies.
+	srv := server.NewServer(ms, server.Options{RouterAddr: strings.TrimPrefix(hs.URL, "http://"), RouterClient: &http.Client{}})
+
+	start := time.Now()
+	got, err := srv.SuspendTask(context.Background(), &v1alpha1.SuspendTaskRequest{Name: "slow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 2500*time.Millisecond {
+		t.Errorf("SuspendTask took %v with a slow runner", d)
+	}
+	if got.GetStatus().GetPhase() != "Suspended" || got.GetStatus().GetOutcome() != "" {
+		t.Errorf("status = %v, want Suspended with no outcome", got.GetStatus())
+	}
 }

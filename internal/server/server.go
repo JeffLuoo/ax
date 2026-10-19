@@ -54,6 +54,13 @@ type Options struct {
 	// Guard authenticates and authorizes every RPC. Nil allows every caller,
 	// and tasks then have no status.created_by.
 	Guard *auth.Guard
+	// RouterAddr is the atenet router's host:port. When it is set, SuspendTask
+	// and DeleteTask ask the runner of a Running task for its command state
+	// before they act, and record the outcome of a command that exited. An
+	// empty RouterAddr turns this check off.
+	RouterAddr string
+	// RouterClient sends that request; nil means a client with a 2 s timeout.
+	RouterClient *http.Client
 }
 
 // Server provides the gRPC API for AX.
@@ -64,6 +71,9 @@ type Server struct {
 	reconciler Reconciler
 	events     events.Emitter
 	grpcServer *grpc.Server
+
+	routerAddr   string
+	routerClient *http.Client
 }
 
 // NewServer creates a new AX API server.
@@ -87,12 +97,19 @@ func NewServer(s store.Store, opts ...Options) *Server {
 		serverOpts = append(serverOpts, grpc.ChainUnaryInterceptor(opt.Guard.Unary), grpc.ChainStreamInterceptor(opt.Guard.Stream))
 	}
 
+	routerClient := opt.RouterClient
+	if routerClient == nil {
+		routerClient = &http.Client{Timeout: finalOutcomeTimeout}
+	}
+
 	srv := &Server{
-		store:      s,
-		locker:     locker,
-		reconciler: opt.Reconciler,
-		events:     emitter,
-		grpcServer: grpc.NewServer(serverOpts...),
+		store:        s,
+		locker:       locker,
+		reconciler:   opt.Reconciler,
+		events:       emitter,
+		grpcServer:   grpc.NewServer(serverOpts...),
+		routerAddr:   opt.RouterAddr,
+		routerClient: routerClient,
 	}
 	v1alpha1.RegisterAXServer(srv.grpcServer, srv)
 	return srv
@@ -298,6 +315,9 @@ func (s *Server) DeleteTask(ctx context.Context, req *v1alpha1.DeleteTaskRequest
 		return nil, status.Errorf(codes.Internal, "getting task: %v", err)
 	}
 
+	// The delete removes the runner, so read its outcome first.
+	s.recordFinalOutcome(ctx, task)
+
 	// Mark the task as terminating while actor cleanup is in progress.
 	if task.Status == nil {
 		task.Status = &v1alpha1.TaskStatus{}
@@ -357,6 +377,8 @@ func (s *Server) SuspendTask(ctx context.Context, req *v1alpha1.SuspendTaskReque
 		}
 		return nil, status.Errorf(codes.Internal, "getting task: %v", err)
 	}
+	// The poller does not ask a suspended task, so read the outcome first.
+	s.recordFinalOutcome(ctx, task)
 	if task.Status == nil {
 		task.Status = &v1alpha1.TaskStatus{}
 	}

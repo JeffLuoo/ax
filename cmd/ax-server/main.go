@@ -187,11 +187,18 @@ func main() {
 		slog.Warn("--auth=false: every caller can act on every atespace with ax-server's Substrate credentials")
 	}
 
+	// A suspend or a delete reads the outcome of a running task first, but
+	// only when task outcomes are on.
+	outcomeRouterAddr := routerAddr
+	if outcomePollInterval <= 0 {
+		outcomeRouterAddr = ""
+	}
 	srv := server.NewServer(rStore, server.Options{
 		Locker:     rLocker,
 		Reconciler: reconciler,
 		Events:     emitter,
 		Guard:      guard,
+		RouterAddr: outcomeRouterAddr,
 	})
 
 	httpServer := &http.Server{

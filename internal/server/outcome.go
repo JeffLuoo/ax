@@ -41,6 +41,9 @@ const (
 	outcomeLockTimeout = 30 * time.Second
 	// maxStatuszBytes bounds a /statusz response.
 	maxStatuszBytes = 64 << 10
+	// finalOutcomeTimeout bounds the /statusz request that a suspend or a
+	// delete makes while it holds the task's lock.
+	finalOutcomeTimeout = 2 * time.Second
 )
 
 // OutcomePollerOptions configures RunOutcomePoller.
@@ -170,8 +173,40 @@ func (s *Server) checkOutcome(ctx context.Context, client *http.Client, routerAd
 	if err != nil || task.GetStatus().GetPhase() != "Running" || task.GetStatus().GetOutcome() != "" {
 		return false
 	}
+	return s.recordOutcomeLocked(ctx, client, routerAddr, task, 0)
+}
 
-	st, err := fetchStatusz(ctx, client, routerAddr, atespace, name)
+// recordFinalOutcome asks the runner of a Running task with no outcome for
+// its command state once, and records an exit in task and in the store.
+// SuspendTask and DeleteTask call it while they hold the task's lock, before
+// they act: after a suspend the poller does not ask, and after a delete
+// there is no runner to ask. A command that exited after the last poll
+// otherwise loses its outcome. It does nothing when no router is set, and a
+// failed request does not stop the caller.
+func (s *Server) recordFinalOutcome(ctx context.Context, task *v1alpha1.Task) {
+	if s.routerAddr == "" || task.GetStatus().GetPhase() != "Running" || task.GetStatus().GetOutcome() != "" {
+		return
+	}
+	s.recordOutcomeLocked(ctx, s.routerClient, s.routerAddr, task, finalOutcomeTimeout)
+}
+
+// recordOutcomeLocked asks task's runner for its command state and records
+// an exit in task and in the store. The caller holds the task's lock and has
+// checked that the stored task is Running and has no outcome. A timeout
+// greater than zero bounds the request; the store write does not count
+// against it. It reports whether it set the outcome.
+func (s *Server) recordOutcomeLocked(ctx context.Context, client *http.Client, routerAddr string, task *v1alpha1.Task, timeout time.Duration) bool {
+	atespace, name := task.GetMetadata().GetAtespace(), task.GetMetadata().GetName()
+	if atespace == "" {
+		atespace = "default"
+	}
+	fetchCtx := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		fetchCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	st, err := fetchStatusz(fetchCtx, client, routerAddr, atespace, name)
 	if err != nil {
 		slog.Debug("reading task command state", "task", atespace+"/"+name, "error", err)
 		return false
