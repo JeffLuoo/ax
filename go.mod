@@ -6,6 +6,7 @@ require (
 	github.com/agent-substrate/env v0.0.11-0.20260912052224-4468a200b170
 	github.com/agent-substrate/substrate v0.4.1-0.20261009152331-f6a1dc72a35d
 	github.com/cenkalti/backoff/v5 v5.0.3
+	github.com/go-logr/logr v1.4.4
 	github.com/redis/go-redis/v9 v9.22.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.23.0
@@ -26,7 +27,6 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
-	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
 	github.com/go-openapi/jsonreference v1.0.0 // indirect

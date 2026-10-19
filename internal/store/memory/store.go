@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 
 	"github.com/google/ax/internal/store"
@@ -117,12 +118,18 @@ func (s *MemoryStore) ListTasks(ctx context.Context, atespace string, limit, off
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var result []*v1alpha1.Task
-	for _, t := range s.tasks {
+	var keys []string
+	for k, t := range s.tasks {
 		if atespace == "" || atespace == "*" || t.Metadata.Atespace == atespace {
-			cp := clone(t)
-			result = append(result, cp)
+			keys = append(keys, k)
 		}
+	}
+	// A fixed order makes the pages of an offset read add up to the whole
+	// list, as in the Redis store.
+	sort.Strings(keys)
+	result := make([]*v1alpha1.Task, 0, len(keys))
+	for _, k := range keys {
+		result = append(result, clone(s.tasks[k]))
 	}
 
 	if offset >= int64(len(result)) {

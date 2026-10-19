@@ -19,7 +19,9 @@
 // that FinOps can roll sub-task cost up to the parent task, compare spend with
 // the budget, and split cost by outcome. ax-server sends one when a task is
 // created, when its phase changes, when it is deleted, and when its outcome is
-// set.
+// set. It also sends the current state of every task again at an interval
+// (the task resync), because the exporter drops an event when its queue is
+// full, and FinOps keeps task state in memory only.
 package events
 
 import (
@@ -98,11 +100,14 @@ func Enabled() bool {
 // NewFromEnv returns an OTLP/gRPC Emitter configured by the standard
 // OTEL_EXPORTER_OTLP_* variables when Enabled, and a Nop otherwise. Records
 // go through a batch processor, so TaskChanged only enqueues; a full queue
-// drops records rather than blocking.
+// drops records rather than blocking. The processor does not send a dropped
+// record again: CountDrops logs and counts the drops, and the task resync of
+// ax-server sends the current state of each task again later.
 func NewFromEnv(ctx context.Context) (Emitter, error) {
 	if !Enabled() {
 		return Nop{}, nil
 	}
+	CountDrops()
 	exp, err := otlploggrpc.New(ctx)
 	if err != nil {
 		return nil, err

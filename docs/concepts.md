@@ -27,6 +27,8 @@ When the task command exits, the runner records the exit status on the durable v
 
 When `ax-server` creates a task, it sets `status.id` to a unique ID and `status.parentId` to the `status.id` of the parent at that time. If you delete a parent and create a new task with the same name, the new task has a different ID, so it does not adopt the children of the old parent. With authentication on, `ax-server` also sets `status.createdBy` to the verified name of the caller. The events carry these values as `ax.task.id`, `ax.task.parent_id`, and `ax.task.created_by`.
 
+`ax-server` sends each event through a queue, and it does not wait for the export. When the queue is full, the exporter drops the event and does not send it again. `ax-server` writes a warning with the number of dropped events to its log. Agent FinOps keeps the task state in memory, so after a restart of FinOps or of its collector, FinOps does not know a task until the next event of that task. To repair both cases, `ax-server` sends the current state of every stored task again when it starts and then at an interval (`--task-resync-interval`, default `10m`; `0` turns the resync off). The resync reads 500 tasks at a time and waits one second after each page, so it does not fill the queue. The resync takes the lock of each task for one store read only. When an RPC holds the lock of a task for more than two seconds, the resync skips that task, and the RPC sends its own event.
+
 
 ## Workspace
 
