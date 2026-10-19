@@ -47,7 +47,7 @@ spec:
 
 ### Sandbox size
 
-`spec.resources.limits` sets the size of the sandbox: AX writes the CPU and memory limits into the task's Agent Substrate actor template, and Substrate books that size on a worker. When `limits` is not set, AX uses `requests`. When neither is set, AX uses the defaults of `ax-server` (`--default-task-cpu`, default `1`, and `--default-task-memory`, default `2Gi`). The values are Kubernetes quantities, for example `500m`, `2`, or `4Gi`, and they must be greater than zero.
+`spec.resources.limits` sets the size of the sandbox: AX writes the CPU and memory limits into the task's Agent Substrate actor template, and Substrate books that size on a worker. When `limits` is not set, AX uses `requests`. When neither is set, AX uses the defaults of `ax-server` (`--default-task-cpu`, default `1`, and `--default-task-memory`, default `2Gi`). The values are Kubernetes quantities, for example `500m`, `2`, or `4Gi`, and they must be greater than zero. An existing actor keeps the size of the template that it was created from, so a new default does not change a task that exists. See [Upgrading](upgrading.md).
 
 ### Outcome
 

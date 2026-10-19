@@ -124,6 +124,7 @@ Want to see the whole lifecycle end to end? Run [`./demo.sh`](demo.sh). It appli
 | [Runners](docs/runner.md) | Understand the contract between the control plane and the task container, and build your own runner image to replace the default. |
 | [Networking](docs/networking.md) | Reach a running task through the atenet router from the cluster, your laptop, or a gRPC client. |
 | [Architecture](DESIGN.md) | Understand how the control plane fits together, plus the [API reference](DESIGN.md#api-reference). |
+| [Upgrading](docs/upgrading.md) | See the defaults that this version of `ax-server` changes, and what each change does to existing tasks. |
 | [Development](docs/development.md) | Build, test, and ship changes to AX itself. |
 | [Roadmap](docs/roadmap.md) | See planned milestones across core specs, actor architecture, agentic environments, and governance. |
 

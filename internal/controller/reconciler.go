@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/google/ax/internal/model"
 	"github.com/google/ax/internal/substrate"
 	"github.com/google/ax/pkg/apis/v1alpha1"
@@ -204,8 +205,17 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, wor
 		extraEnv["AX_WORKSPACES_YAML"] = wsYAML
 	}
 
-	// If a custom image, workspace, or extra environment is specified, provision or use a dedicated ActorTemplate
-	if task.Spec != nil && (task.Spec.Image != "" || len(extraEnv) > 0) {
+	// An existing actor keeps the template that it was created from: Substrate
+	// does not move an actor to another template. The template name hashes
+	// the launch configuration and the ax-server default size, so an upgrade
+	// of ax-server, or a new Gemini key, changes the name for an existing
+	// task. A new template then has no actor, and its golden snapshot costs
+	// time and storage, so do not create it.
+	if ref := r.existingActorTemplate(ctx, atespace, actorName); ref != nil {
+		templateAtespace = ref.GetAtespace()
+		templateName = ref.GetName()
+	} else if task.Spec != nil && (task.Spec.Image != "" || len(extraEnv) > 0) {
+		// If a custom image, workspace, or extra environment is specified, provision or use a dedicated ActorTemplate
 		slog.Info("ensuring custom ActorTemplate for task", "image", task.Spec.Image)
 		limits := TaskLimits(task.Spec, r.DefaultLimits)
 		customTemplateName := taskTemplateName(task.Metadata.Name, task.Spec.Image, limits, extraEnv)
@@ -414,10 +424,31 @@ func (r *TaskReconciler) lookupGeminiKey(ctx context.Context, atespace string) s
 	return ""
 }
 
+// existingActorTemplate returns the template of the task's actor, or nil when
+// the actor does not exist, is being deleted, or cannot be read. A crashed
+// actor counts: EnsureActor reverts it, or creates it again from the same
+// template.
+func (r *TaskReconciler) existingActorTemplate(ctx context.Context, atespace, actorName string) *ateapipb.ObjectRef {
+	actor, err := r.client.GetActor(ctx, atespace, actorName)
+	if err != nil || actor == nil {
+		return nil
+	}
+	if actor.GetStatus().GetState() == ateapipb.ActorState_ACTOR_STATE_DELETING {
+		return nil
+	}
+	ref := actor.GetActorTemplate()
+	if ref.GetName() == "" {
+		return nil
+	}
+	return ref
+}
+
 // taskTemplateName derives the per-task ActorTemplate name from the task name and a
 // digest of the image, the sandbox limits, and the container environment, so a
-// change to any of them yields a new template. The limits are hashed on their
-// own because a new ax-server default changes them with no change to the spec.
+// change to any of them yields a new template for a new actor. The limits are
+// hashed on their own because a new ax-server default changes them with no
+// change to the spec. An existing actor keeps its template; see
+// existingActorTemplate.
 func taskTemplateName(taskName, image string, limits substrate.Limits, env map[string]string) string {
 	h := sha256.New()
 	h.Write([]byte(image))

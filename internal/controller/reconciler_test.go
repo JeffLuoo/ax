@@ -17,6 +17,7 @@ package controller_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -51,6 +52,7 @@ type mockControlServer struct {
 	resumeActorErr    error
 	crashedActor      string
 	revertedActors    []string
+	actorTemplateRefs map[string]*ateapipb.ObjectRef
 }
 
 // noSecrets is a SecretResolver for tests: it never finds a key and never touches a cluster.
@@ -99,7 +101,14 @@ func (m *mockControlServer) CreateActor(ctx context.Context, req *ateapipb.Creat
 	if name == m.crashedActor {
 		return nil, status.Error(codes.AlreadyExists, "actor exists")
 	}
+	if _, ok := m.actorTemplateRefs[name]; ok {
+		return nil, status.Error(codes.AlreadyExists, "actor exists")
+	}
 	m.createdActors = append(m.createdActors, name)
+	if m.actorTemplateRefs == nil {
+		m.actorTemplateRefs = make(map[string]*ateapipb.ObjectRef)
+	}
+	m.actorTemplateRefs[name] = req.GetActor().GetActorTemplate()
 	return &ateapipb.Actor{
 		Metadata: &ateapipb.ResourceMetadata{Name: name},
 		Status: &ateapipb.ActorStatus{
@@ -160,6 +169,7 @@ func (m *mockControlServer) RevertActor(_ context.Context, req *ateapipb.RevertA
 func (m *mockControlServer) DeleteActor(ctx context.Context, req *ateapipb.DeleteActorRequest) (*ateapipb.Actor, error) {
 	name := req.GetActor().GetName()
 	m.deletedActors = append(m.deletedActors, name)
+	delete(m.actorTemplateRefs, name)
 	return &ateapipb.Actor{Metadata: &ateapipb.ResourceMetadata{Name: name}}, nil
 }
 
@@ -182,8 +192,9 @@ func (m *mockControlServer) GetActor(ctx context.Context, req *ateapipb.GetActor
 	for _, a := range m.createdActors {
 		if a == name {
 			return &ateapipb.Actor{
-				Metadata: &ateapipb.ResourceMetadata{Name: name},
-				Status:   &ateapipb.ActorStatus{State: ateapipb.ActorState_ACTOR_STATE_RUNNING},
+				Metadata:      &ateapipb.ResourceMetadata{Name: name},
+				ActorTemplate: m.actorTemplateRefs[name],
+				Status:        &ateapipb.ActorStatus{State: ateapipb.ActorState_ACTOR_STATE_RUNNING},
 			}, nil
 		}
 	}
@@ -494,8 +505,17 @@ func TestTaskReconciler_WorkspaceReady(t *testing.T) {
 		t.Fatalf("readiness updates and suspend/resume created %d templates, want 1", got)
 	}
 
-	// A launch configuration change must still get a distinct template.
+	// A launch configuration change must still get a distinct template when
+	// the actor is created again. An existing actor keeps its template.
 	task.Spec.Command = []string{"python3", "agent.py"}
+	if _, err := reconciler.Reconcile(ctx, task, nil); err != nil {
+		t.Fatalf("Reconcile with changed command failed: %v", err)
+	}
+	if got := len(mockSrv.actorTemplates); got != 1 {
+		t.Errorf("command change for an existing actor left %d templates, want 1", got)
+	}
+	mockSrv.deletedActors = append(mockSrv.deletedActors, task.Metadata.Name)
+	delete(mockSrv.actorTemplateRefs, task.Metadata.Name)
 	if _, err := reconciler.Reconcile(ctx, task, nil); err != nil {
 		t.Fatalf("Reconcile with changed command failed: %v", err)
 	}
@@ -852,9 +872,11 @@ func TestTaskReconciler_TemplateCarriesLimits(t *testing.T) {
 
 	reconciler := controller.NewTaskReconciler(client, "test-template", v1alpha1.DefaultSystemNamespace)
 	reconciler.SecretResolver = noSecrets
+	n := 0
 	newTask := func(res *v1alpha1.ResourcesSpec) *v1alpha1.Task {
+		n++
 		return &v1alpha1.Task{
-			Metadata: &v1alpha1.ObjectMeta{Name: "sized", Atespace: "default"},
+			Metadata: &v1alpha1.ObjectMeta{Name: fmt.Sprintf("sized-%d", n), Atespace: "default"},
 			Spec:     &v1alpha1.TaskSpec{Image: "img", Resources: res},
 			Status:   &v1alpha1.TaskStatus{Phase: "Suspended"},
 		}
@@ -875,7 +897,8 @@ func TestTaskReconciler_TemplateCarriesLimits(t *testing.T) {
 	if _, err := reconciler.Reconcile(ctx, newTask(nil)); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	// New server defaults, with no change to the spec, make a new template.
+	// New server defaults, with no change to the spec, make a new template
+	// for a new task.
 	reconciler.DefaultLimits = substrate.Limits{CPU: "500m", Memory: "1Gi"}
 	if _, err := reconciler.Reconcile(ctx, newTask(nil)); err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -899,5 +922,68 @@ func TestTaskReconciler_TemplateCarriesLimits(t *testing.T) {
 	}
 	if len(names) != 3 {
 		t.Errorf("template names = %v, want 3 distinct names", names)
+	}
+}
+
+// An actor keeps the template that it was created from. New server defaults
+// change the template name of an existing task, but the next suspend or
+// resume must not create a template that no actor uses, or wait for its
+// golden snapshot.
+func TestTaskReconciler_ExistingActorKeepsItsTemplate(t *testing.T) {
+	ctx := context.Background()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer lis.Close()
+	mockSrv := &mockControlServer{}
+	grpcServer := grpc.NewServer()
+	ateapipb.RegisterControlServer(grpcServer, mockSrv)
+	go grpcServer.Serve(lis)
+	defer grpcServer.Stop()
+	client, err := substrate.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to create substrate client: %v", err)
+	}
+	defer client.Close()
+
+	reconciler := controller.NewTaskReconciler(client, "test-template", v1alpha1.DefaultSystemNamespace)
+	reconciler.SecretResolver = noSecrets
+	task := &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "old", Atespace: "default"},
+		Spec:     &v1alpha1.TaskSpec{Image: "img"},
+		Status:   &v1alpha1.TaskStatus{Phase: "Suspended"},
+	}
+	if _, err := reconciler.Reconcile(ctx, task); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(mockSrv.createdTemplates) != 1 {
+		t.Fatalf("created %d templates on create, want 1", len(mockSrv.createdTemplates))
+	}
+	first := mockSrv.createdTemplates[0].GetMetadata().GetName()
+
+	// An upgrade of ax-server changes the default size.
+	reconciler.DefaultLimits = substrate.Limits{CPU: "500m", Memory: "1Gi"}
+	if _, err := reconciler.Reconcile(ctx, task); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(mockSrv.createdTemplates) != 1 {
+		t.Errorf("created %d templates, want no new template for an existing actor", len(mockSrv.createdTemplates))
+	}
+	if got := mockSrv.actorTemplateRefs["old"].GetName(); got != first {
+		t.Errorf("actor template = %q, want %q", got, first)
+	}
+	if len(mockSrv.createdActors) != 1 {
+		t.Errorf("created actors %v, want the existing actor only", mockSrv.createdActors)
+	}
+
+	// A deleted actor is created again with the current template.
+	mockSrv.deletedActors = append(mockSrv.deletedActors, "old")
+	delete(mockSrv.actorTemplateRefs, "old")
+	if _, err := reconciler.Reconcile(ctx, task); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(mockSrv.createdTemplates) != 2 {
+		t.Errorf("created %d templates, want a new template for a new actor", len(mockSrv.createdTemplates))
 	}
 }
