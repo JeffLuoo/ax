@@ -70,6 +70,7 @@ type Totals struct {
 	// arrived (for example a stream without usage, or one cut short), so
 	// they are neither priced nor counted in UnpricedCalls.
 	UnknownCostCalls int64            `json:"unknownCostCalls,omitempty" yaml:"unknownCostCalls,omitempty"`
+	LowerBoundCalls  int64            `json:"lowerBoundCalls,omitempty" yaml:"lowerBoundCalls,omitempty"`
 	UsageStatus      map[string]int64 `json:"usageStatus,omitempty" yaml:"usageStatus,omitempty"`
 	LastCall         string           `json:"lastCall,omitempty" yaml:"lastCall,omitempty"`
 }
@@ -107,8 +108,8 @@ type ModelCost struct {
 	LastCall              string           `json:"lastCall,omitempty" yaml:"lastCall,omitempty"`
 }
 
-// ActorCost holds full cost attribution (LLM, compute, storage, idle/platform
-// overhead, and sub-agent tree rollup) for one actor or Kubernetes pod.
+// ActorCost holds active cost attribution (LLM, compute, storage, egress,
+// and sub-agent tree rollup) for one actor or Kubernetes pod.
 type ActorCost struct {
 	Atespace      string `json:"atespace" yaml:"atespace"`
 	Name          string `json:"name" yaml:"name"`
@@ -121,33 +122,30 @@ type ActorCost struct {
 	IsAgent       bool   `json:"isAgent" yaml:"isAgent"`
 	// Note is set on a row that is not one actor: spend whose actor finops
 	// could not identify, or actors beyond its limit. Such a row has no name.
-	Note                    string           `json:"note,omitempty" yaml:"note,omitempty"`
-	Calls                   int64            `json:"calls" yaml:"calls"`
-	InputTokens             int64            `json:"inputTokens" yaml:"inputTokens"`
-	OutputTokens            int64            `json:"outputTokens" yaml:"outputTokens"`
-	CacheReadInputTokens    int64            `json:"cacheReadInputTokens,omitempty" yaml:"cacheReadInputTokens,omitempty"`
-	CacheWriteInputTokens   int64            `json:"cacheWriteInputTokens,omitempty" yaml:"cacheWriteInputTokens,omitempty"`
-	ReasoningOutputTokens   int64            `json:"reasoningOutputTokens,omitempty" yaml:"reasoningOutputTokens,omitempty"`
-	Cost                    MoneyMap         `json:"cost" yaml:"cost"`
-	UnpricedCalls           int64            `json:"unpricedCalls,omitempty" yaml:"unpricedCalls,omitempty"`
-	UnknownCostCalls        int64            `json:"unknownCostCalls,omitempty" yaml:"unknownCostCalls,omitempty"`
-	UsageStatus             map[string]int64 `json:"usageStatus,omitempty" yaml:"usageStatus,omitempty"`
-	LastCall                string           `json:"lastCall,omitempty" yaml:"lastCall,omitempty"`
-	Compute                 ComputeSummary   `json:"compute" yaml:"compute"`
-	TotalCost               MoneyMap         `json:"totalCost" yaml:"totalCost"`
-	MeasuredComputeCost     MoneyMap         `json:"measuredComputeCost,omitempty" yaml:"measuredComputeCost,omitempty"`
-	IdleShareCost           MoneyMap         `json:"idleShareCost,omitempty" yaml:"idleShareCost,omitempty"`
-	StorageCost             MoneyMap         `json:"storageCost,omitempty" yaml:"storageCost,omitempty"`
-	EgressCost              MoneyMap         `json:"egressCost,omitempty" yaml:"egressCost,omitempty"`
-	PlatformShareCost       MoneyMap         `json:"platformShareCost,omitempty" yaml:"platformShareCost,omitempty"`
-	HostingCost             MoneyMap         `json:"hostingCost,omitempty" yaml:"hostingCost,omitempty"`
-	MeasuredHostingCost     MoneyMap         `json:"measuredHostingCost,omitempty" yaml:"measuredHostingCost,omitempty"`
-	FullyLoadedCost         MoneyMap         `json:"fullyLoadedCost,omitempty" yaml:"fullyLoadedCost,omitempty"`
-	MeasuredFullyLoadedCost MoneyMap         `json:"measuredFullyLoadedCost,omitempty" yaml:"measuredFullyLoadedCost,omitempty"`
-	TreeLLMCost             MoneyMap         `json:"treeLlmCost,omitempty" yaml:"treeLlmCost,omitempty"`
-	TreeComputeCost         MoneyMap         `json:"treeComputeCost,omitempty" yaml:"treeComputeCost,omitempty"`
-	TreeTotalCost           MoneyMap         `json:"treeTotalCost,omitempty" yaml:"treeTotalCost,omitempty"`
-	TreeFullyLoadedCost     MoneyMap         `json:"treeFullyLoadedCost,omitempty" yaml:"treeFullyLoadedCost,omitempty"`
+	Note                  string           `json:"note,omitempty" yaml:"note,omitempty"`
+	Calls                 int64            `json:"calls" yaml:"calls"`
+	InputTokens           int64            `json:"inputTokens" yaml:"inputTokens"`
+	OutputTokens          int64            `json:"outputTokens" yaml:"outputTokens"`
+	CacheReadInputTokens  int64            `json:"cacheReadInputTokens,omitempty" yaml:"cacheReadInputTokens,omitempty"`
+	CacheWriteInputTokens int64            `json:"cacheWriteInputTokens,omitempty" yaml:"cacheWriteInputTokens,omitempty"`
+	ReasoningOutputTokens int64            `json:"reasoningOutputTokens,omitempty" yaml:"reasoningOutputTokens,omitempty"`
+	WebSearchRequests     int64            `json:"webSearchRequests,omitempty" yaml:"webSearchRequests,omitempty"`
+	Cost                  MoneyMap         `json:"cost" yaml:"cost"`
+	UnpricedCalls         int64            `json:"unpricedCalls,omitempty" yaml:"unpricedCalls,omitempty"`
+	UnknownCostCalls      int64            `json:"unknownCostCalls,omitempty" yaml:"unknownCostCalls,omitempty"`
+	LowerBoundCalls       int64            `json:"lowerBoundCalls,omitempty" yaml:"lowerBoundCalls,omitempty"`
+	UsageStatus           map[string]int64 `json:"usageStatus,omitempty" yaml:"usageStatus,omitempty"`
+	LastCall              string           `json:"lastCall,omitempty" yaml:"lastCall,omitempty"`
+	Compute               ComputeSummary   `json:"compute" yaml:"compute"`
+	TotalCost             MoneyMap         `json:"totalCost" yaml:"totalCost"`
+	MeasuredComputeCost   MoneyMap         `json:"measuredComputeCost,omitempty" yaml:"measuredComputeCost,omitempty"`
+	StorageCost           MoneyMap         `json:"storageCost,omitempty" yaml:"storageCost,omitempty"`
+	EgressCost            MoneyMap         `json:"egressCost,omitempty" yaml:"egressCost,omitempty"`
+	HostingCost           MoneyMap         `json:"hostingCost,omitempty" yaml:"hostingCost,omitempty"`
+	MeasuredHostingCost   MoneyMap         `json:"measuredHostingCost,omitempty" yaml:"measuredHostingCost,omitempty"`
+	TreeLLMCost           MoneyMap         `json:"treeLlmCost,omitempty" yaml:"treeLlmCost,omitempty"`
+	TreeComputeCost       MoneyMap         `json:"treeComputeCost,omitempty" yaml:"treeComputeCost,omitempty"`
+	TreeTotalCost         MoneyMap         `json:"treeTotalCost,omitempty" yaml:"treeTotalCost,omitempty"`
 	// Task is the Ax task that the actor runs, when finops knows it.
 	Task   *TaskCost   `json:"task,omitempty" yaml:"task,omitempty"`
 	Models []ModelCost `json:"models,omitempty" yaml:"models,omitempty"`
@@ -158,7 +156,9 @@ type ActorCost struct {
 type TaskCost struct {
 	Name           string  `json:"name" yaml:"name"`
 	Parent         string  `json:"parent,omitempty" yaml:"parent,omitempty"`
+	ParentSource   string  `json:"parentSource,omitempty" yaml:"parentSource,omitempty"`
 	BudgetUSD      float64 `json:"budgetUsd,omitempty" yaml:"budgetUsd,omitempty"`
+	BudgetSource   string  `json:"budgetSource,omitempty" yaml:"budgetSource,omitempty"`
 	SpendUSD       float64 `json:"spendUsd" yaml:"spendUsd"`
 	TreeSpendUSD   float64 `json:"treeSpendUsd" yaml:"treeSpendUsd"`
 	OverBudget     bool    `json:"overBudget" yaml:"overBudget"`
@@ -173,10 +173,9 @@ type TaskCost struct {
 
 // OutcomeTotals is the cost of the actors whose tasks had one outcome.
 type OutcomeTotals struct {
-	Tasks           int      `json:"tasks" yaml:"tasks"`
-	Actors          int      `json:"actors" yaml:"actors"`
-	TotalCost       MoneyMap `json:"totalCost" yaml:"totalCost"`
-	FullyLoadedCost MoneyMap `json:"fullyLoadedCost" yaml:"fullyLoadedCost"`
+	Tasks     int      `json:"tasks" yaml:"tasks"`
+	Actors    int      `json:"actors" yaml:"actors"`
+	TotalCost MoneyMap `json:"totalCost" yaml:"totalCost"`
 }
 
 // OutcomeCosts splits the actors' own cost by their task's outcome.
@@ -190,29 +189,18 @@ type OutcomeCosts struct {
 	OutcomeSource string `json:"outcomeSource,omitempty" yaml:"outcomeSource,omitempty"`
 }
 
-// VariableHostingUSD returns the variable hosting cost (booked compute + storage + egress).
+// VariableHostingUSD returns the active hosting cost (booked compute + storage + egress).
 func (a ActorCost) VariableHostingUSD() float64 {
 	return a.Compute.Cost.USD() + a.StorageCost.USD() + a.EgressCost.USD()
 }
 
-// MeasuredVariableHostingUSD returns the variable hosting cost using measured CPU usage.
+// MeasuredVariableHostingUSD returns the active hosting cost using measured CPU usage.
 func (a ActorCost) MeasuredVariableHostingUSD() float64 {
 	mc := a.MeasuredComputeCost.USD()
 	if mc == 0 {
 		mc = a.Compute.MeasuredCost.USD()
 	}
 	return mc + a.StorageCost.USD() + a.EgressCost.USD()
-}
-
-// SharedOverheadUSD returns the shared hosting cost (warm-pool idle share + platform overhead share).
-func (a ActorCost) SharedOverheadUSD() float64 {
-	if h := a.HostingCost.USD(); h > 0 {
-		diff := h - a.VariableHostingUSD()
-		if diff > 0 {
-			return diff
-		}
-	}
-	return a.IdleShareCost.USD() + a.PlatformShareCost.USD()
 }
 
 // TemplateCost summarizes cost by agent/actor template.
@@ -238,6 +226,7 @@ type SessionCost struct {
 	OutputTokens  int64    `json:"outputTokens" yaml:"outputTokens"`
 	ActiveSeconds float64  `json:"activeSeconds" yaml:"activeSeconds"`
 	ActiveShare   float64  `json:"activeShare" yaml:"activeShare"`
+	SplitBasis    string   `json:"splitBasis,omitempty" yaml:"splitBasis,omitempty"`
 	LLMCost       MoneyMap `json:"llmCost" yaml:"llmCost"`
 	ComputeCost   MoneyMap `json:"computeCost" yaml:"computeCost"`
 	TotalCost     MoneyMap `json:"totalCost" yaml:"totalCost"`
@@ -248,31 +237,29 @@ type SessionCost struct {
 type CurvePoint struct {
 	ActiveHours float64 `json:"activeHours" yaml:"activeHours"`
 	Variable    float64 `json:"variable" yaml:"variable"`
-	IdleShare   float64 `json:"idleShare" yaml:"idleShare"`
+	Egress      float64 `json:"egress,omitempty" yaml:"egress,omitempty"`
 	Storage     float64 `json:"storage" yaml:"storage"`
-	Platform    float64 `json:"platform" yaml:"platform"`
-	FullyLoaded float64 `json:"fullyLoaded" yaml:"fullyLoaded"`
+	ActiveCost  float64 `json:"activeCost" yaml:"activeCost"`
 	UnderTarget bool    `json:"underTarget" yaml:"underTarget"`
 }
 
 // TierCurve holds the hosting cost sensitivity curve for one pricing tier.
 type TierCurve struct {
-	Tier                string       `json:"tier" yaml:"tier"`
-	PerActiveHour       float64      `json:"perActiveHour" yaml:"perActiveHour"`
-	LoadedPerActiveHour float64      `json:"loadedPerActiveHour" yaml:"loadedPerActiveHour"`
-	Fixed               float64      `json:"fixed" yaml:"fixed"`
-	BreakEvenHours      float64      `json:"breakEvenHours" yaml:"breakEvenHours"`
-	AlwaysOn            float64      `json:"alwaysOn" yaml:"alwaysOn"`
-	Points              []CurvePoint `json:"points" yaml:"points"`
+	Tier           string       `json:"tier" yaml:"tier"`
+	PerActiveHour  float64      `json:"perActiveHour" yaml:"perActiveHour"`
+	EgressPerHour  float64      `json:"egressPerHour,omitempty" yaml:"egressPerHour,omitempty"`
+	Fixed          float64      `json:"fixed" yaml:"fixed"`
+	BreakEvenHours float64      `json:"breakEvenHours" yaml:"breakEvenHours"`
+	AlwaysOn       float64      `json:"alwaysOn" yaml:"alwaysOn"`
+	Points         []CurvePoint `json:"points" yaml:"points"`
 }
 
 // CurveReport is the response from GET /v1/costs/curve (and embedded in /v1/costs).
 type CurveReport struct {
-	TargetUSD           float64     `json:"targetUsd" yaml:"targetUsd"`
-	PoolUtilization     float64     `json:"poolUtilization" yaml:"poolUtilization"`
-	StoragePerAgentUSD  float64     `json:"storagePerAgentUsd" yaml:"storagePerAgentUsd"`
-	PlatformPerAgentUSD float64     `json:"platformPerAgentUsd" yaml:"platformPerAgentUsd"`
-	Tiers               []TierCurve `json:"tiers" yaml:"tiers"`
+	TargetUSD          float64     `json:"targetUsd" yaml:"targetUsd"`
+	StoragePerAgentUSD float64     `json:"storagePerAgentUsd" yaml:"storagePerAgentUsd"`
+	PriceList          string      `json:"priceList,omitempty" yaml:"priceList,omitempty"`
+	Tiers              []TierCurve `json:"tiers" yaml:"tiers"`
 }
 
 // FocusElement describes one resource element in FOCUS AllocatedMethodDetails.
@@ -415,17 +402,17 @@ type CostReport struct {
 	Atespace string `json:"atespace,omitempty" yaml:"atespace,omitempty"`
 	// CostBasis says how far the numbers can be trusted, e.g. "estimated".
 	CostBasis           string               `json:"costBasis,omitempty" yaml:"costBasis,omitempty"`
-	Totals              Totals               `json:"totals" yaml:"totals"`
-	Compute             ComputeSummary       `json:"compute" yaml:"compute"`
-	TotalCost           MoneyMap             `json:"totalCost" yaml:"totalCost"`
-	FullyLoadedCost     MoneyMap             `json:"fullyLoadedCost" yaml:"fullyLoadedCost"`
-	Actors              []ActorCost          `json:"actors" yaml:"actors"`
-	Templates           []TemplateCost       `json:"templates,omitempty" yaml:"templates,omitempty"`
-	Sessions            []SessionCost        `json:"sessions,omitempty" yaml:"sessions,omitempty"`
-	Curve               []TierCurve          `json:"curve,omitempty" yaml:"curve,omitempty"`
-	Focus               []FocusCharge        `json:"focus,omitempty" yaml:"focus,omitempty"`
-	FocusReconciliation *FocusReconciliation `json:"focusReconciliation,omitempty" yaml:"focusReconciliation,omitempty"`
-	OutcomeCosts        *OutcomeCosts        `json:"outcomeCosts,omitempty" yaml:"outcomeCosts,omitempty"`
+	Totals                 Totals               `json:"totals" yaml:"totals"`
+	Compute                ComputeSummary       `json:"compute" yaml:"compute"`
+	TotalCost              MoneyMap             `json:"totalCost" yaml:"totalCost"`
+	Actors                 []ActorCost          `json:"actors" yaml:"actors"`
+	Templates              []TemplateCost       `json:"templates,omitempty" yaml:"templates,omitempty"`
+	Sessions               []SessionCost        `json:"sessions,omitempty" yaml:"sessions,omitempty"`
+	Curve                  []TierCurve          `json:"curve,omitempty" yaml:"curve,omitempty"`
+	Focus                  []FocusCharge        `json:"focus,omitempty" yaml:"focus,omitempty"`
+	FocusReconciliation    *FocusReconciliation `json:"focusReconciliation,omitempty" yaml:"focusReconciliation,omitempty"`
+	CrossTenantParentLinks int                  `json:"crossTenantParentLinks,omitempty" yaml:"crossTenantParentLinks,omitempty"`
+	OutcomeCosts           *OutcomeCosts        `json:"outcomeCosts,omitempty" yaml:"outcomeCosts,omitempty"`
 }
 
 // Estimated reports whether the report's numbers are estimates: the server

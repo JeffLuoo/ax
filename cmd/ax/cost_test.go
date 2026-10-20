@@ -106,40 +106,34 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 		writeCostReport(w, r, finops.CostReport{
 			Since:           "2026-10-17T00:00:00Z",
 			GeneratedAt:     "2026-10-17T01:00:00Z",
-			Totals:          finops.Totals{Calls: 2, InputTokens: 2800, OutputTokens: 600, Cost: finops.MoneyMap{"USD": 0.015525}},
-			Compute:         finops.ComputeSummary{Leases: 2, LeaseSeconds: 20, VCPUSeconds: 10, GiBSeconds: 20, Cost: finops.MoneyMap{"USD": 0.000171}},
-			TotalCost:       finops.MoneyMap{"USD": 0.016046},
-			FullyLoadedCost: finops.MoneyMap{"USD": 0.308161},
+			Totals:      finops.Totals{Calls: 2, InputTokens: 2800, OutputTokens: 600, Cost: finops.MoneyMap{"USD": 0.015525}},
+			Compute:     finops.ComputeSummary{Leases: 2, LeaseSeconds: 20, VCPUSeconds: 10, GiBSeconds: 20, Cost: finops.MoneyMap{"USD": 0.000171}},
+			TotalCost:   finops.MoneyMap{"USD": 0.016046},
 			Actors: []finops.ActorCost{
 				{
-					Atespace:                "otel-bench",
-					Name:                    "coding-parent-1",
-					UID:                     "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
-					Tenant:                  "otel-bench",
-					SubAgents:               1,
-					Template:                "agent-template",
-					Class:                   "agent",
-					IsAgent:                 true,
-					Calls:                   1,
-					InputTokens:             2000,
-					OutputTokens:            400,
-					CacheReadInputTokens:    500,
-					CacheWriteInputTokens:   250,
-					Cost:                    finops.MoneyMap{"USD": 0.013088},
-					Compute:                 finops.ComputeSummary{Leases: 1, LeaseSeconds: 12, VCPUSeconds: 6, GiBSeconds: 12, Cost: finops.MoneyMap{"USD": 0.000103}, MeasuredCPUSeconds: 3.12},
-					TotalCost:               finops.MoneyMap{"USD": 0.013540},
-					MeasuredComputeCost:     finops.MoneyMap{"USD": 0.000042},
-					IdleShareCost:           finops.MoneyMap{"USD": 0.145633},
-					StorageCost:             finops.MoneyMap{"USD": 0.000350},
-					PlatformShareCost:       finops.MoneyMap{"USD": 0.000258},
-					HostingCost:             finops.MoneyMap{"USD": 0.146344},
-					MeasuredHostingCost:     finops.MoneyMap{"USD": 0.146283},
-					FullyLoadedCost:         finops.MoneyMap{"USD": 0.159432},
-					MeasuredFullyLoadedCost: finops.MoneyMap{"USD": 0.159371},
-					TreeLLMCost:             finops.MoneyMap{"USD": 0.015525},
-					TreeComputeCost:         finops.MoneyMap{"USD": 0.000171},
-					TreeTotalCost:           finops.MoneyMap{"USD": 0.016046},
-					TreeFullyLoadedCost:     finops.MoneyMap{"USD": 0.308161},
+					Atespace:              "otel-bench",
+					Name:                  "coding-parent-1",
+					UID:                   "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
+					Tenant:                "otel-bench",
+					SubAgents:             1,
+					Template:              "agent-template",
+					Class:                 "agent",
+					IsAgent:               true,
+					Calls:                 1,
+					InputTokens:           2000,
+					OutputTokens:          400,
+					CacheReadInputTokens:  500,
+					CacheWriteInputTokens: 250,
+					Cost:                  finops.MoneyMap{"USD": 0.013088},
+					Compute:               finops.ComputeSummary{Leases: 1, LeaseSeconds: 12, VCPUSeconds: 6, GiBSeconds: 12, Cost: finops.MoneyMap{"USD": 0.000103}, MeasuredCPUSeconds: 3.12},
+					TotalCost:             finops.MoneyMap{"USD": 0.013540},
+					MeasuredComputeCost:   finops.MoneyMap{"USD": 0.000042},
+					StorageCost:           finops.MoneyMap{"USD": 0.000350},
+					HostingCost:           finops.MoneyMap{"USD": 0.000453},
+					MeasuredHostingCost:   finops.MoneyMap{"USD": 0.000392},
+					TreeLLMCost:           finops.MoneyMap{"USD": 0.015525},
+					TreeComputeCost:       finops.MoneyMap{"USD": 0.000171},
+					TreeTotalCost:         finops.MoneyMap{"USD": 0.016046},
 					Models: []finops.ModelCost{
 						{
 							Provider:              "anthropic",
@@ -154,23 +148,22 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 					},
 				},
 				{
-					Atespace:            "otel-bench",
-					Name:                "coding-sub-1",
-					UID:                 "a5cbff7e-3268-42c3-ab88-65d9c6c8a66e",
-					Tenant:              "otel-bench",
-					ParentAgentID:       "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
-					Template:            "agent-template",
-					Class:               "agent",
-					IsAgent:             true,
-					Calls:               1,
-					InputTokens:         800,
-					OutputTokens:        200,
-					Cost:                finops.MoneyMap{"USD": 0.002438},
-					Compute:             finops.ComputeSummary{Leases: 1, LeaseSeconds: 8, VCPUSeconds: 4, GiBSeconds: 8, Cost: finops.MoneyMap{"USD": 0.000068}},
-					TotalCost:           finops.MoneyMap{"USD": 0.002856},
-					HostingCost:         finops.MoneyMap{"USD": 0.146291},
-					FullyLoadedCost:     finops.MoneyMap{"USD": 0.148729},
-					TreeFullyLoadedCost: finops.MoneyMap{"USD": 0.148729},
+					Atespace:      "otel-bench",
+					Name:          "coding-sub-1",
+					UID:           "a5cbff7e-3268-42c3-ab88-65d9c6c8a66e",
+					Tenant:        "otel-bench",
+					ParentAgentID: "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
+					Template:      "agent-template",
+					Class:         "agent",
+					IsAgent:       true,
+					Calls:         1,
+					InputTokens:   800,
+					OutputTokens:  200,
+					Cost:          finops.MoneyMap{"USD": 0.002438},
+					Compute:       finops.ComputeSummary{Leases: 1, LeaseSeconds: 8, VCPUSeconds: 4, GiBSeconds: 8, Cost: finops.MoneyMap{"USD": 0.000068}},
+					TotalCost:     finops.MoneyMap{"USD": 0.002856},
+					HostingCost:   finops.MoneyMap{"USD": 0.000068},
+					TreeTotalCost: finops.MoneyMap{"USD": 0.002856},
 				},
 			},
 			Sessions: []finops.SessionCost{
@@ -196,21 +189,18 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/v1/costs/curve", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(finops.CurveReport{
-			TargetUSD:           1.0,
-			PoolUtilization:     0.65,
-			StoragePerAgentUSD:  0.0115,
-			PlatformPerAgentUSD: 0.72,
+			TargetUSD:          1.0,
+			StoragePerAgentUSD: 0.0115,
 			Tiers: []finops.TierCurve{
 				{
-					Tier:                "on-demand",
-					PerActiveHour:       0.015393,
-					LoadedPerActiveHour: 0.023681,
-					Fixed:               0.7315,
-					BreakEvenHours:      11.3383,
-					AlwaysOn:            18.0185,
+					Tier:           "on-demand",
+					PerActiveHour:  0.015393,
+					Fixed:          0.0115,
+					BreakEvenHours: 64.2175,
+					AlwaysOn:       11.2484,
 					Points: []finops.CurvePoint{
-						{ActiveHours: 10, FullyLoaded: 0.9683, UnderTarget: true},
-						{ActiveHours: 15, FullyLoaded: 1.0867, UnderTarget: false},
+						{ActiveHours: 10, ActiveCost: 0.1654, UnderTarget: true},
+						{ActiveHours: 15, ActiveCost: 0.2424, UnderTarget: true},
 					},
 				},
 			},
@@ -336,7 +326,7 @@ func TestRunCostCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runCost list failed: %v", err)
 		}
-		for _, want := range []string{"NAME", "PHASE", "coding-parent-1", "Running", "$0.159432", "$0.308161", "Summary (atespace otel-bench, 2 rows)", "fully_loaded=$0.308161", "Cost basis: ESTIMATE — NOT RECONCILED"} {
+		for _, want := range []string{"NAME", "PHASE", "coding-parent-1", "Running", "$0.013540", "$0.016046", "Summary (atespace otel-bench, 2 rows)", "total=$0.016046", "Cost basis: ESTIMATE — NOT RECONCILED"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("expected output to contain %q, got:\n%s", want, out)
 			}
@@ -353,9 +343,7 @@ func TestRunCostCommands(t *testing.T) {
 		for _, want := range []string{
 			"Actor UID:          f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
 			"Task Phase:         Running",
-			"1. Variable Hosting Cost",
-			"2. Shared Overhead",
-			"3. Fully Loaded Hosting Cost",
+			"1. Active Hosting Cost",
 			"claude-sonnet-4-5",
 			"Tree (Own + 1 Sub-Agents)",
 			"coding-sub-1",
@@ -374,7 +362,7 @@ func TestRunCostCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runCost curve failed: %v", err)
 		}
-		for _, want := range []string{"Hosting Cost Sensitivity Curve", "on-demand", "11.34 h/mo", "$0.9683"} {
+		for _, want := range []string{"Hosting Cost Sensitivity Curve", "on-demand", "64.22 h/mo", "$0.1654"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("expected curve output to contain %q, got:\n%s", want, out)
 			}

@@ -61,10 +61,9 @@ const warningReport = `{
   "totals": {"calls": 9, "cost": {"USD": 0.5}, "unpricedCalls": 2, "unknownCostCalls": 3, "usageStatus": {"ok": 4, "missing": 2, "truncated": 1}},
   "compute": {"leases": 2, "cost": {"USD": 0.25}, "unpricedLeases": 1},
   "totalCost": {"USD": 0.75},
-  "fullyLoadedCost": {"USD": 0.9},
   "actors": [
     {"atespace": "team-a", "name": "agent-1", "uid": "u1", "isAgent": true, "calls": 5, "cost": {"USD": 0.4},
-     "totalCost": {"USD": 0.6}, "fullyLoadedCost": {"USD": 0.7},
+     "totalCost": {"USD": 0.6},
      "task": {"name": "agent-1", "budgetUsd": 0.5, "spendUsd": 0.6, "treeSpendUsd": 0.6, "overBudget": true, "outcome": "Failed", "exitCode": 3}},
     {"atespace": "", "name": "", "note": "unknown actor", "calls": 4, "cost": {"USD": 0.1}, "totalCost": {"USD": 0.15}}
   ],
@@ -85,7 +84,7 @@ func TestCostList_LabelsEstimatesAndWarnsAboutLeftOutSpend(t *testing.T) {
 		"Failed",
 		"$0.600000/$0.500000 OVER",
 		"Summary (all atespaces, 2 rows): calls=9",
-		"total=$0.750000 fully_loaded=$0.900000",
+		"total=$0.750000",
 		// A server with no outcomeSource predates it: its outcomes are the exit code.
 		"By task outcome (self-reported): completed=$0.000000 (0 tasks) failed=$0.600000 (1 tasks)",
 		"Cost basis: ESTIMATE — NOT RECONCILED",
@@ -292,7 +291,7 @@ func TestCostFocus_LabelsAnEstimatedOrigin(t *testing.T) {
 		"coverage=2.0000 lease-h / 2.5000 activation-h (ratio 0.8000)",
 		"Status:          NOT CHECKED AGAINST A BILL",
 		"EFFECTIVE ($)",
-		"Auxiliary Charges (tokens, storage, platform overhead):",
+		"Auxiliary Charges (tokens, storage):",
 		"token-usage",
 		"Estimated Leases: 1",
 		"ate-workers/spot origin=$0.200000 allocated=$0.100000 unallocated=$0.100000 agents=1 problems: leases booked more than the pool's capacity",

@@ -35,9 +35,6 @@
   "totalCost": {
     "USD": 0.093557474343
   },
-  "fullyLoadedCost": {
-    "USD": 0.139829855146
-  },
   "actors": [
     {
       "atespace": "team-a",
@@ -82,32 +79,20 @@
       "measuredComputeCost": {
         "USD": 0.053461339621
       },
-      "idleShareCost": {
-        "USD": 0.026331704589
-      },
       "storageCost": {
         "USD": 0.000109619127
       },
       "hostingCost": {
-        "USD": 0.079902663337
+        "USD": 0.053570958748
       },
       "measuredHostingCost": {
-        "USD": 0.079902663337
-      },
-      "fullyLoadedCost": {
-        "USD": 0.079902663337
-      },
-      "measuredFullyLoadedCost": {
-        "USD": 0.079902663337
+        "USD": 0.053570958748
       },
       "treeComputeCost": {
         "USD": 0.053461339621
       },
       "treeTotalCost": {
         "USD": 0.053461339621
-      },
-      "treeFullyLoadedCost": {
-        "USD": 0.079902663337
       },
       "task": {
         "name": "child",
@@ -166,32 +151,20 @@
       "measuredComputeCost": {
         "USD": 0.001881468934
       },
-      "idleShareCost": {
-        "USD": 0.019748842475
-      },
       "storageCost": {
-        "USD": 0.000082214612
+        "USD": 8.2214612e-05
       },
       "hostingCost": {
-        "USD": 0.059927191809
+        "USD": 0.040178349334
       },
       "measuredHostingCost": {
-        "USD": 0.021712526021
-      },
-      "fullyLoadedCost": {
-        "USD": 0.059927191809
-      },
-      "measuredFullyLoadedCost": {
-        "USD": 0.021712526021
+        "USD": 0.001963683546
       },
       "treeComputeCost": {
         "USD": 0.093557474343
       },
       "treeTotalCost": {
         "USD": 0.093557474343
-      },
-      "treeFullyLoadedCost": {
-        "USD": 0.139829855146
       },
       "task": {
         "name": "root",
@@ -282,126 +255,99 @@
     {
       "tier": "on-demand",
       "perActiveHour": 0.040085,
-      "loadedPerActiveHour": 0.059828358208955226,
-      "fixed": 0.16,
-      "breakEvenHours": 14.040164650118497,
-      "alwaysOn": 43.83470149253731,
+      "fixed": 0.06,
+      "breakEvenHours": 23.450168392166642,
+      "alwaysOn": 29.32205,
       "points": [
         {
           "activeHours": 0,
           "variable": 0,
-          "idleShare": 0,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.16,
+          "activeCost": 0.06,
           "underTarget": true
         },
         {
           "activeHours": 1,
           "variable": 0.040085,
-          "idleShare": 0.019743358208955217,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.21982835820895522,
+          "activeCost": 0.10008500000000001,
           "underTarget": true
         },
         {
           "activeHours": 2,
           "variable": 0.08017,
-          "idleShare": 0.039486716417910434,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.27965671641791046,
+          "activeCost": 0.14017000000000002,
           "underTarget": true
         },
         {
           "activeHours": 5,
           "variable": 0.20042500000000002,
-          "idleShare": 0.0987167910447761,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.45914179104477615,
+          "activeCost": 0.260425,
           "underTarget": true
         },
         {
           "activeHours": 10,
           "variable": 0.40085000000000004,
-          "idleShare": 0.1974335820895522,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.7582835820895523,
+          "activeCost": 0.46085000000000004,
           "underTarget": true
         },
         {
           "activeHours": 15,
           "variable": 0.601275,
-          "idleShare": 0.29615037313432824,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 1.0574253731343284,
-          "underTarget": false
+          "activeCost": 0.6612750000000001,
+          "underTarget": true
         },
         {
           "activeHours": 20,
           "variable": 0.8017000000000001,
-          "idleShare": 0.3948671641791044,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 1.3565671641791046,
-          "underTarget": false
+          "activeCost": 0.8617000000000001,
+          "underTarget": true
         },
         {
           "activeHours": 30,
           "variable": 1.20255,
-          "idleShare": 0.5923007462686565,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 1.9548507462686566,
+          "activeCost": 1.26255,
           "underTarget": false
         },
         {
           "activeHours": 50,
           "variable": 2.0042500000000003,
-          "idleShare": 0.9871679104477611,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 3.1514179104477615,
+          "activeCost": 2.0642500000000004,
           "underTarget": false
         },
         {
           "activeHours": 100,
           "variable": 4.008500000000001,
-          "idleShare": 1.9743358208955222,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 6.142835820895522,
+          "activeCost": 4.0685,
           "underTarget": false
         },
         {
           "activeHours": 200,
           "variable": 8.017000000000001,
-          "idleShare": 3.9486716417910444,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 12.125671641791046,
+          "activeCost": 8.077000000000002,
           "underTarget": false
         },
         {
           "activeHours": 365,
           "variable": 14.631025000000001,
-          "idleShare": 7.206325746268654,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 21.997350746268655,
+          "activeCost": 14.691025000000002,
           "underTarget": false
         },
         {
           "activeHours": 730,
           "variable": 29.262050000000002,
-          "idleShare": 14.412651492537307,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 43.83470149253731,
+          "activeCost": 29.32205,
           "underTarget": false
         }
       ]
@@ -409,126 +355,99 @@
     {
       "tier": "cud-1y",
       "perActiveHour": 0.025252999999999998,
-      "loadedPerActiveHour": 0.0376910447761194,
-      "fixed": 0.16,
-      "breakEvenHours": 22.28646101453293,
-      "alwaysOn": 27.67446268656716,
+      "fixed": 0.06,
+      "breakEvenHours": 37.22330020195621,
+      "alwaysOn": 18.49469,
       "points": [
         {
           "activeHours": 0,
           "variable": 0,
-          "idleShare": 0,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.16,
+          "activeCost": 0.06,
           "underTarget": true
         },
         {
           "activeHours": 1,
           "variable": 0.025252999999999998,
-          "idleShare": 0.0124380447761194,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.1976910447761194,
+          "activeCost": 0.085253,
           "underTarget": true
         },
         {
           "activeHours": 2,
           "variable": 0.050505999999999995,
-          "idleShare": 0.0248760895522388,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.2353820895522388,
+          "activeCost": 0.110506,
           "underTarget": true
         },
         {
           "activeHours": 5,
           "variable": 0.126265,
-          "idleShare": 0.062190223880597,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.348455223880597,
+          "activeCost": 0.186265,
           "underTarget": true
         },
         {
           "activeHours": 10,
           "variable": 0.25253,
-          "idleShare": 0.124380447761194,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.536910447761194,
+          "activeCost": 0.31253,
           "underTarget": true
         },
         {
           "activeHours": 15,
           "variable": 0.378795,
-          "idleShare": 0.18657067164179097,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.725365671641791,
+          "activeCost": 0.438795,
           "underTarget": true
         },
         {
           "activeHours": 20,
           "variable": 0.50506,
-          "idleShare": 0.248760895522388,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.913820895522388,
+          "activeCost": 0.5650599999999999,
           "underTarget": true
         },
         {
           "activeHours": 30,
           "variable": 0.75759,
-          "idleShare": 0.37314134328358195,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 1.290731343283582,
-          "underTarget": false
+          "activeCost": 0.81759,
+          "underTarget": true
         },
         {
           "activeHours": 50,
           "variable": 1.2626499999999998,
-          "idleShare": 0.6219022388059698,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 2.0445522388059696,
+          "activeCost": 1.3226499999999999,
           "underTarget": false
         },
         {
           "activeHours": 100,
           "variable": 2.5252999999999997,
-          "idleShare": 1.2438044776119397,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 3.9291044776119395,
+          "activeCost": 2.5852999999999997,
           "underTarget": false
         },
         {
           "activeHours": 200,
           "variable": 5.050599999999999,
-          "idleShare": 2.4876089552238794,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 7.698208955223878,
+          "activeCost": 5.110599999999999,
           "underTarget": false
         },
         {
           "activeHours": 365,
           "variable": 9.217345,
-          "idleShare": 4.53988634328358,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 13.91723134328358,
+          "activeCost": 9.277345,
           "underTarget": false
         },
         {
           "activeHours": 730,
           "variable": 18.43469,
-          "idleShare": 9.07977268656716,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 27.67446268656716,
+          "activeCost": 18.49469,
           "underTarget": false
         }
       ]
@@ -536,126 +455,99 @@
     {
       "tier": "spot",
       "perActiveHour": 0.012025000000000001,
-      "loadedPerActiveHour": 0.01794776119402985,
-      "fixed": 0.16,
-      "breakEvenHours": 46.8024948024948,
-      "alwaysOn": 13.261865671641791,
+      "fixed": 0.06,
+      "breakEvenHours": 78.17047817047816,
+      "alwaysOn": 8.83825,
       "points": [
         {
           "activeHours": 0,
           "variable": 0,
-          "idleShare": 0,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.16,
+          "activeCost": 0.06,
           "underTarget": true
         },
         {
           "activeHours": 1,
           "variable": 0.012025000000000001,
-          "idleShare": 0.00592276119402985,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.17794776119402986,
+          "activeCost": 0.072025,
           "underTarget": true
         },
         {
           "activeHours": 2,
           "variable": 0.024050000000000002,
-          "idleShare": 0.0118455223880597,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.1958955223880597,
+          "activeCost": 0.08405,
           "underTarget": true
         },
         {
           "activeHours": 5,
           "variable": 0.060125000000000005,
-          "idleShare": 0.029613805970149253,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.24973880597014927,
+          "activeCost": 0.12012500000000001,
           "underTarget": true
         },
         {
           "activeHours": 10,
           "variable": 0.12025000000000001,
-          "idleShare": 0.059227611940298505,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.3394776119402985,
+          "activeCost": 0.18025000000000002,
           "underTarget": true
         },
         {
           "activeHours": 15,
           "variable": 0.180375,
-          "idleShare": 0.08884141791044775,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.42921641791044773,
+          "activeCost": 0.240375,
           "underTarget": true
         },
         {
           "activeHours": 20,
           "variable": 0.24050000000000002,
-          "idleShare": 0.11845522388059701,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.518955223880597,
+          "activeCost": 0.3005,
           "underTarget": true
         },
         {
           "activeHours": 30,
           "variable": 0.36075,
-          "idleShare": 0.1776828358208955,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 0.6984328358208954,
+          "activeCost": 0.42075,
           "underTarget": true
         },
         {
           "activeHours": 50,
           "variable": 0.6012500000000001,
-          "idleShare": 0.29613805970149254,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 1.0573880597014926,
-          "underTarget": false
+          "activeCost": 0.6612500000000001,
+          "underTarget": true
         },
         {
           "activeHours": 100,
           "variable": 1.2025000000000001,
-          "idleShare": 0.5922761194029851,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 1.9547761194029853,
+          "activeCost": 1.2625000000000002,
           "underTarget": false
         },
         {
           "activeHours": 200,
           "variable": 2.4050000000000002,
-          "idleShare": 1.1845522388059702,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 3.7495522388059705,
+          "activeCost": 2.4650000000000003,
           "underTarget": false
         },
         {
           "activeHours": 365,
           "variable": 4.389125,
-          "idleShare": 2.1618078358208948,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 6.710932835820894,
+          "activeCost": 4.4491249999999996,
           "underTarget": false
         },
         {
           "activeHours": 730,
           "variable": 8.77825,
-          "idleShare": 4.3236156716417895,
           "storage": 0.06,
-          "platform": 0.1,
-          "fullyLoaded": 13.26186567164179,
+          "activeCost": 8.83825,
           "underTarget": false
         }
       ]
@@ -670,7 +562,7 @@
       "ChargePeriodStart": "2026-10-19T11:57:58Z",
       "ChargePeriodEnd": "2026-10-19T13:57:59.317765611Z",
       "ChargeCategory": "Usage",
-      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked)",
       "ServiceProviderName": "Google Cloud",
       "HostProviderName": "Google Cloud",
       "ServiceName": "Kubernetes Engine",
@@ -688,7 +580,7 @@
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true",
-        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/origin-basis": "booked",
         "finops.agent-substrate.dev/summary-atespace": "all",
         "finops.agent-substrate.dev/tier": "on-demand"
       },
@@ -733,7 +625,7 @@
       "ChargePeriodStart": "2026-10-19T11:57:58Z",
       "ChargePeriodEnd": "2026-10-19T13:57:59.317765611Z",
       "ChargeCategory": "Usage",
-      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked)",
       "ServiceProviderName": "Google Cloud",
       "HostProviderName": "Google Cloud",
       "ServiceName": "Kubernetes Engine",
@@ -751,7 +643,7 @@
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true",
-        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/origin-basis": "booked",
         "finops.agent-substrate.dev/summary-atespace": "all",
         "finops.agent-substrate.dev/tier": "on-demand"
       },
@@ -795,7 +687,7 @@
       "ChargePeriodStart": "2026-10-19T11:57:58Z",
       "ChargePeriodEnd": "2026-10-19T13:57:59.317765611Z",
       "ChargeCategory": "Usage",
-      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked-over-utilization)",
+      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked)",
       "ServiceProviderName": "Google Cloud",
       "HostProviderName": "Google Cloud",
       "ServiceName": "Kubernetes Engine",
@@ -813,7 +705,7 @@
       "BilledCost": 0,
       "Tags": {
         "finops.agent-substrate.dev/estimated": "true",
-        "finops.agent-substrate.dev/origin-basis": "booked-over-utilization",
+        "finops.agent-substrate.dev/origin-basis": "booked",
         "finops.agent-substrate.dev/summary-atespace": "all",
         "finops.agent-substrate.dev/tier": "on-demand"
       },
@@ -850,9 +742,6 @@
       "actors": 1,
       "totalCost": {
         "USD": 0.040096134722
-      },
-      "fullyLoadedCost": {
-        "USD": 0.059927191809
       }
     },
     "failed": {
@@ -860,22 +749,17 @@
       "actors": 1,
       "totalCost": {
         "USD": 0.053461339621
-      },
-      "fullyLoadedCost": {
-        "USD": 0.079902663337
       }
     },
     "unfinished": {
       "tasks": 0,
       "actors": 0,
-      "totalCost": {},
-      "fullyLoadedCost": {}
+      "totalCost": {}
     },
     "noTask": {
       "tasks": 0,
       "actors": 0,
-      "totalCost": {},
-      "fullyLoadedCost": {}
+      "totalCost": {}
     },
     "outcomeSource": "sandbox"
   }

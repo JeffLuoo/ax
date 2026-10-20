@@ -48,7 +48,6 @@ const sampleCostsJSON = `{
     "measuredCpuSeconds": 51.52
   },
   "totalCost": {"USD": 0.132383},
-  "fullyLoadedCost": {"USD": 0.132660},
   "actors": [
     {
       "atespace": "otel-bench",
@@ -78,16 +77,12 @@ const sampleCostsJSON = `{
       },
       "totalCost": {"USD": 0.066339},
       "measuredComputeCost": {"USD": 0.000355},
-      "idleShareCost": {"USD": 0.000210},
       "storageCost": {"USD": 0.000002},
-      "hostingCost": {"USD": 0.000639},
-      "measuredHostingCost": {"USD": 0.000567},
-      "fullyLoadedCost": {"USD": 0.066551},
-      "measuredFullyLoadedCost": {"USD": 0.066480},
+      "hostingCost": {"USD": 0.000429},
+      "measuredHostingCost": {"USD": 0.000357},
       "treeLlmCost": {"USD": 0.131825},
       "treeComputeCost": {"USD": 0.000558},
       "treeTotalCost": {"USD": 0.132383},
-      "treeFullyLoadedCost": {"USD": 0.132660},
       "models": [
         {
           "provider": "anthropic",
@@ -122,9 +117,7 @@ const sampleCostsJSON = `{
         "cost": {"USD": 0.000131}
       },
       "totalCost": {"USD": 0.066044},
-      "fullyLoadedCost": {"USD": 0.066109},
-      "treeTotalCost": {"USD": 0.066044},
-      "treeFullyLoadedCost": {"USD": 0.066109}
+      "treeTotalCost": {"USD": 0.066044}
     }
   ],
   "sessions": [
@@ -175,7 +168,7 @@ func TestClientGetActorCost(t *testing.T) {
 	if len(m.Children) != 1 || m.Children[0].Name != "coding-sub-1" || len(m.SubAgents) != 1 {
 		t.Fatalf("unexpected children: %+v", m.Children)
 	}
-	if !strings.Contains(string(m.Raw), `"measuredFullyLoadedCost"`) {
+	if !strings.Contains(string(m.Raw), `"measuredHostingCost"`) {
 		t.Errorf("raw actor row lost fields: %s", m.Raw)
 	}
 	if got := actor.VariableHostingUSD(); got <= 0 {

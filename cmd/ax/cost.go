@@ -41,7 +41,7 @@ const costUsage = `Usage:
   ax cost curve [-o table|json|yaml]
   ax cost focus [-o table|json|csv|yaml]
 
-Query Agent FinOps cost attribution, 3-number hosting cost breakdown
+Query Agent FinOps cost attribution, active hosting cost breakdown
 (booked-share vs. measured-usage), per-session spend, task budgets and
 outcomes, the < $1/agent-month hosting sensitivity curve, and FOCUS 1.3
 split cost allocation rows.
@@ -352,11 +352,11 @@ func renderCostList(out io.Writer, report *finops.CostReport, scope string, task
 	if wide {
 		cols = append(cols, "UID")
 	}
-	cols = append(cols, "CALLS", "TOKENS(IN/OUT)", "LLM($)", "HOSTING($)", "OWN-LOADED($)")
+	cols = append(cols, "CALLS", "TOKENS(IN/OUT)", "LLM($)", "HOSTING($)", "TOTAL($)")
 	if wide {
 		cols = append(cols, "MEASURED($)", "SUB-AGENTS")
 	}
-	cols = append(cols, "TREE-LOADED($)")
+	cols = append(cols, "TREE-TOTAL($)")
 	if hasTasks {
 		cols = append(cols, "SPEND/BUDGET($)")
 	}
@@ -389,11 +389,11 @@ func renderCostList(out io.Writer, report *finops.CostReport, scope string, task
 			cells = append(cells, firstNonEmpty(a.UID, "-"))
 		}
 		cells = append(cells, fmt.Sprint(a.Calls), fmt.Sprintf("%d/%d", a.InputTokens, a.OutputTokens),
-			formatUSD(a.Cost.USD()), formatUSD(a.HostingCost.USD()), formatUSD(a.FullyLoadedCost.USD()))
+			formatUSD(a.Cost.USD()), formatUSD(a.HostingCost.USD()), formatUSD(a.TotalCost.USD()))
 		if wide {
-			cells = append(cells, formatUSD(a.MeasuredFullyLoadedCost.USD()), fmt.Sprint(a.SubAgents))
+			cells = append(cells, formatUSD(a.MeasuredHostingCost.USD()), fmt.Sprint(a.SubAgents))
 		}
-		cells = append(cells, formatUSD(a.TreeFullyLoadedCost.USD()))
+		cells = append(cells, formatUSD(a.TreeTotalCost.USD()))
 		if hasTasks {
 			cell := "-"
 			if v != nil && v.budgetUSD > 0 {
@@ -416,10 +416,10 @@ func renderCostList(out io.Writer, report *finops.CostReport, scope string, task
 	}
 	if serverFiltered {
 		t := report.Totals
-		fmt.Fprintf(out, "\nSummary (%s, %d rows): calls=%d tokens=%d/%d llm=%s compute=%s total=%s fully_loaded=%s\n",
+		fmt.Fprintf(out, "\nSummary (%s, %d rows): calls=%d tokens=%d/%d llm=%s compute=%s total=%s\n",
 			scopeLabel, len(rows), t.Calls, t.InputTokens, t.OutputTokens,
 			formatUSD(t.Cost.USD()), formatUSD(report.Compute.Cost.USD()),
-			formatUSD(report.TotalCost.USD()), formatUSD(report.FullyLoadedCost.USD()))
+			formatUSD(report.TotalCost.USD()))
 	} else {
 		fmt.Fprintf(out, "\nSummary (%s, %d rows): the server did not filter by atespace, so it sent no totals for this atespace\n", scopeLabel, len(rows))
 	}
@@ -614,21 +614,21 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 	measuredCompute := a.MeasuredComputeCost.USD()
 	storageUSD := a.StorageCost.USD()
 	egressUSD := a.EgressCost.USD()
-	varBooked := a.VariableHostingUSD()
-	varMeasured := a.MeasuredVariableHostingUSD()
-
-	idleUSD := a.IdleShareCost.USD()
-	platformUSD := a.PlatformShareCost.USD()
-	sharedUSD := idleUSD + platformUSD
 
 	hostingBooked := a.HostingCost.USD()
+	if hostingBooked == 0 {
+		hostingBooked = a.VariableHostingUSD()
+	}
 	hostingMeasured := a.MeasuredHostingCost.USD()
+	if hostingMeasured == 0 {
+		hostingMeasured = a.MeasuredVariableHostingUSD()
+	}
 
-	fmt.Fprintln(out, "\nHosting Cost Breakdown (Three-Number Attribution):")
+	fmt.Fprintln(out, "\nHosting Cost Breakdown (Active Cost):")
 	hw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
 	fmt.Fprintln(hw, "  COMPONENT\tBOOKED-SHARE ($)\tMEASURED-USAGE ($)\tDETAILS")
-	fmt.Fprintf(hw, "  1. Variable Hosting Cost\t%s\t%s\tcompute + snapshot storage + egress\n",
-		formatUSD(varBooked), formatUSD(varMeasured))
+	fmt.Fprintf(hw, "  1. Active Hosting Cost\t%s\t%s\tcompute + snapshot storage + egress\n",
+		formatUSD(hostingBooked), formatUSD(hostingMeasured))
 	fmt.Fprintf(hw, "     - Compute Leases\t%s\t%s\tleases=%d duration=%.1fs booked=%.4f vCPU-h / %.4f GiB-h measured=%.2f CPU-s\n",
 		formatUSD(bookedCompute), formatUSD(measuredCompute),
 		a.Compute.Leases, a.Compute.LeaseSeconds,
@@ -640,14 +640,6 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 		fmt.Fprintf(hw, "     - Egress Network\t%s\t%s\tmetered internet egress\n",
 			formatUSD(egressUSD), formatUSD(egressUSD))
 	}
-	fmt.Fprintf(hw, "  2. Shared Overhead\t%s\t%s\twarm-pool idle + control-plane share\n",
-		formatUSD(sharedUSD), formatUSD(sharedUSD))
-	fmt.Fprintf(hw, "     - Warm-Pool Idle Share\t%s\t%s\tunallocated worker pool capacity\n",
-		formatUSD(idleUSD), formatUSD(idleUSD))
-	fmt.Fprintf(hw, "     - Platform Overhead Share\t%s\t%s\tate-system + finops control plane\n",
-		formatUSD(platformUSD), formatUSD(platformUSD))
-	fmt.Fprintf(hw, "  3. Fully Loaded Hosting Cost\t%s\t%s\tvariable hosting + shared overhead\n",
-		formatUSD(hostingBooked), formatUSD(hostingMeasured))
 	_ = hw.Flush()
 
 	fmt.Fprintln(out, "\nModel Token & Inference Cost:")
@@ -667,31 +659,29 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 	_ = mw.Flush()
 
 	ownDirect := a.TotalCost.USD()
-	ownLoaded := a.FullyLoadedCost.USD()
-	ownMeasuredLoaded := a.MeasuredFullyLoadedCost.USD()
 	treeLLM := a.TreeLLMCost.USD()
+	treeCompute := a.TreeComputeCost.USD()
 	treeDirect := a.TreeTotalCost.USD()
-	treeLoaded := a.TreeFullyLoadedCost.USD()
 
 	fmt.Fprintln(out, "\nTotal Cost Summary (Own vs. Sub-Agent Tree):")
 	tw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "  SCOPE\tLLM ($)\tLLM + COMPUTE ($)\tFULLY LOADED (BOOKED $)\tFULLY LOADED (MEASURED $)")
-	fmt.Fprintf(tw, "  Own (%s/%s)\t%s\t%s\t%s\t%s\n",
-		a.Atespace, a.Name, formatUSD(a.Cost.USD()), formatUSD(ownDirect), formatUSD(ownLoaded), formatUSD(ownMeasuredLoaded))
-	if a.SubAgents > 0 || len(children) > 0 || treeLoaded > ownLoaded {
-		fmt.Fprintf(tw, "  Tree (Own + %d Sub-Agents)\t%s\t%s\t%s\t-\n",
-			a.SubAgents, formatUSD(treeLLM), formatUSD(treeDirect), formatUSD(treeLoaded))
+	fmt.Fprintln(tw, "  SCOPE\tLLM ($)\tCOMPUTE ($)\tLLM + COMPUTE ($)\tHOSTING (BOOKED $)\tHOSTING (MEASURED $)")
+	fmt.Fprintf(tw, "  Own (%s/%s)\t%s\t%s\t%s\t%s\t%s\n",
+		a.Atespace, a.Name, formatUSD(a.Cost.USD()), formatUSD(bookedCompute), formatUSD(ownDirect), formatUSD(hostingBooked), formatUSD(hostingMeasured))
+	if a.SubAgents > 0 || len(children) > 0 || treeDirect > ownDirect {
+		fmt.Fprintf(tw, "  Tree (Own + %d Sub-Agents)\t%s\t%s\t%s\t-\t-\n",
+			a.SubAgents, formatUSD(treeLLM), formatUSD(treeCompute), formatUSD(treeDirect))
 	}
 	_ = tw.Flush()
 
 	if len(children) > 0 {
 		fmt.Fprintln(out, "\nSub-Agents (gen_ai.agent.parent_id names this actor):")
 		cw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-		fmt.Fprintln(cw, "  NAME\tATESPACE\tUID\tTEMPLATE\tCALLS\tLLM ($)\tHOSTING ($)\tFULLY LOADED ($)")
+		fmt.Fprintln(cw, "  NAME\tATESPACE\tUID\tTEMPLATE\tCALLS\tLLM ($)\tHOSTING ($)\tTOTAL ($)")
 		for _, c := range children {
 			fmt.Fprintf(cw, "  %s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 				c.Name, c.Atespace, c.UID, c.Template, c.Calls,
-				formatUSD(c.Cost.USD()), formatUSD(c.HostingCost.USD()), formatUSD(c.FullyLoadedCost.USD()))
+				formatUSD(c.Cost.USD()), formatUSD(c.HostingCost.USD()), formatUSD(c.TotalCost.USD()))
 		}
 		_ = cw.Flush()
 	}
@@ -720,17 +710,14 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 
 func renderCurveReport(out io.Writer, curve *finops.CurveReport) error {
 	fmt.Fprintf(out, "Hosting Cost Sensitivity Curve (< $%.2f / agent-month claim)\n", curve.TargetUSD)
-	fmt.Fprintf(out, "  Pool Utilization:      %.0f%%\n", curve.PoolUtilization*100.0)
-	fmt.Fprintf(out, "  Storage / Agent-Mo:    %s\n", formatUSD(curve.StoragePerAgentUSD))
-	fmt.Fprintf(out, "  Platform / Agent-Mo:   %s\n\n", formatUSD(curve.PlatformPerAgentUSD))
+	fmt.Fprintf(out, "  Storage / Agent-Mo:    %s\n\n", formatUSD(curve.StoragePerAgentUSD))
 
 	tw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "TIER\tVARIABLE ($/ACT-HR)\tLOADED ($/ACT-HR)\tFIXED ($/MO)\tMAX HOURS (< TARGET)\tALWAYS-ON (730H)")
+	fmt.Fprintln(tw, "TIER\tVARIABLE ($/ACT-HR)\tFIXED ($/MO)\tMAX HOURS (< TARGET)\tALWAYS-ON (730H)")
 	for _, t := range curve.Tiers {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%.2f h/mo (%.2f h/day)\t$%.2f/mo\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%.2f h/mo (%.2f h/day)\t$%.2f/mo\n",
 			t.Tier,
 			formatUSD(t.PerActiveHour),
-			formatUSD(t.LoadedPerActiveHour),
 			formatUSD(t.Fixed),
 			t.BreakEvenHours,
 			t.BreakEvenHours/30.4375,
@@ -742,7 +729,7 @@ func renderCurveReport(out io.Writer, curve *finops.CurveReport) error {
 	}
 
 	if len(curve.Tiers) > 0 && len(curve.Tiers[0].Points) > 0 {
-		fmt.Fprintln(out, "\nFully Loaded Hosting Cost ($ / agent-month) by Active Hours:")
+		fmt.Fprintln(out, "\nActive Hosting Cost ($ / agent-month) by Active Hours:")
 		pw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
 		var header strings.Builder
 		header.WriteString("  ACTIVE-HRS/MO")
@@ -761,7 +748,7 @@ func renderCurveReport(out io.Writer, curve *finops.CurveReport) error {
 			for _, t := range curve.Tiers {
 				if idx < len(t.Points) {
 					pt := t.Points[idx]
-					row.WriteString(fmt.Sprintf("\t$%.4f", pt.FullyLoaded))
+					row.WriteString(fmt.Sprintf("\t$%.4f", pt.ActiveCost))
 					if pt.UnderTarget {
 						passing = append(passing, t.Tier)
 					}
@@ -862,7 +849,7 @@ func renderFocusReport(out io.Writer, focus *finops.FocusReport) error {
 		return err
 	}
 	if len(focus.AuxiliaryCharges) > 0 {
-		fmt.Fprintln(out, "\nAuxiliary Charges (tokens, storage, platform overhead):")
+		fmt.Fprintln(out, "\nAuxiliary Charges (tokens, storage):")
 		w = tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
 		fmt.Fprintln(w, "ALLOCATED-RESOURCE-ID\tALLOCATED-NAME\tMETHOD\tSERVICE\tQUANTITY\tUNIT\tEFFECTIVE ($)\tBILLED ($)\tTENANT\tCLASS\tESTIMATE")
 		for _, c := range focus.AuxiliaryCharges {
