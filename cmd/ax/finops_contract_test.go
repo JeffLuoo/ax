@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/google/ax/internal/finops"
+	"github.com/google/ax/pkg/apis/v1alpha1"
 )
 
 // The files testdata/finops-*.json and finops-focus.csv are the responses of
@@ -76,7 +77,7 @@ func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
 		byName[a.Name] = a
 	}
 	child := byName["child"]
-	if child.ParentAgentID != "team-a/root" || child.Task == nil || child.Task.Outcome != "Failed" || child.Task.ExitCode == nil || *child.Task.ExitCode != 3 || !child.Task.OverBudget ||
+	if child.Task == nil || child.Task.Outcome != "Failed" || child.Task.ExitCode == nil || *child.Task.ExitCode != 3 || !child.Task.OverBudget ||
 		child.Task.OutcomeSource != "sandbox" || report.OutcomeCosts.OutcomeSource != "sandbox" {
 		t.Errorf("child row = %+v, task %+v", child, child.Task)
 	}
@@ -110,7 +111,20 @@ func TestFinOpsContract_CLIRendersTheGolden(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	out, err := captureStdout(t, func() error { return runCost(srv.URL, "", "team-a", true, nil) })
+	ax := axServer(t,
+		&v1alpha1.Task{
+			Metadata: &v1alpha1.ObjectMeta{Name: "root", Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Budget: &v1alpha1.Budget{MaxUsd: 5}},
+			Status:   &v1alpha1.TaskStatus{Id: "task-root-1", Phase: "Running", Outcome: v1alpha1.OutcomeCompleted, ExitCode: 0},
+		},
+		&v1alpha1.Task{
+			Metadata: &v1alpha1.ObjectMeta{Name: "child", Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Parent: "root", Budget: &v1alpha1.Budget{MaxUsd: 0.01}},
+			Status:   &v1alpha1.TaskStatus{Id: "task-child-1", ParentId: "task-root-1", Phase: "Running", Outcome: v1alpha1.OutcomeFailed, ExitCode: 3},
+		},
+	)
+
+	out, err := captureStdout(t, func() error { return runCost(srv.URL, ax, "team-a", true, nil) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,20 +134,20 @@ func TestFinOpsContract_CLIRendersTheGolden(t *testing.T) {
 		}
 	}
 
-	out, err = captureStdout(t, func() error { return runCost(srv.URL, "", "team-a", true, []string{"task", "child"}) })
+	out, err = captureStdout(t, func() error { return runCost(srv.URL, ax, "team-a", true, []string{"task", "child"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Parent Task:        root", "Outcome:            Failed (self-reported: exit code 3)", "Budget:             $0.010000", "OVER BUDGET", "Parent Agent:       team-a/root"} {
+	for _, want := range []string{"Parent Task:        root", "Outcome:            Failed (self-reported: exit code 3)", "Budget:             $0.010000", "OVER BUDGET"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("detail output lacks %q:\n%s", want, out)
 		}
 	}
-	out, err = captureStdout(t, func() error { return runCost(srv.URL, "", "team-a", true, []string{"task", "root"}) })
+	out, err = captureStdout(t, func() error { return runCost(srv.URL, ax, "team-a", true, []string{"task", "root"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "child") || !strings.Contains(out, "Sub-Agents (gen_ai.agent.parent_id names this actor)") {
+	if !strings.Contains(out, "child") || !strings.Contains(out, "Sub-Agents:") {
 		t.Errorf("root detail does not list its sub-agent:\n%s", out)
 	}
 

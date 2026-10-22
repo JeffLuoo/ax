@@ -401,7 +401,7 @@ type CostReport struct {
 	// its totals then cover only that atespace.
 	Atespace string `json:"atespace,omitempty" yaml:"atespace,omitempty"`
 	// CostBasis says how far the numbers can be trusted, e.g. "estimated".
-	CostBasis           string               `json:"costBasis,omitempty" yaml:"costBasis,omitempty"`
+	CostBasis              string               `json:"costBasis,omitempty" yaml:"costBasis,omitempty"`
 	Totals                 Totals               `json:"totals" yaml:"totals"`
 	Compute                ComputeSummary       `json:"compute" yaml:"compute"`
 	TotalCost              MoneyMap             `json:"totalCost" yaml:"totalCost"`
@@ -475,7 +475,23 @@ type ActorMatch struct {
 	// SessionCosts and Children are the decoded Sessions and SubAgents.
 	SessionCosts []SessionCost
 	Children     []ActorCost
-	Report       *CostReport
+	// RawActors holds the raw actor rows of Report.Actors so the caller can
+	// populate SubAgents from its own task tree.
+	RawActors []json.RawMessage
+	// Canonical reports whether Actor is the canonical cost record for its
+	// "<atespace>/<name>".
+	Canonical bool
+	Report    *CostReport
+}
+
+// NotFoundError is returned when GetActorCost finds no FinOps record for the
+// target actor.
+type NotFoundError struct {
+	Target string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("no FinOps cost record found for %q", e.Target)
 }
 
 // AmbiguousError is returned when a name or UID prefix matches more than one
@@ -557,7 +573,7 @@ func (c *Client) GetActorCost(ctx context.Context, atespace string, atespaceExpl
 		if atespaceExplicit {
 			where = atespace + "/" + target
 		}
-		return nil, fmt.Errorf("no FinOps cost record found for %q", where)
+		return nil, &NotFoundError{Target: where}
 	case 1:
 	default:
 		var cands []string
@@ -570,26 +586,24 @@ func (c *Client) GetActorCost(ctx context.Context, atespace string, atespaceExpl
 
 	idx := matches[0]
 	matched := &report.Actors[idx]
-	m := &ActorMatch{Actor: matched, Raw: rawReport.Actors[idx], Report: report}
+	canonicalIdx := CanonicalActorIndex(report.Actors, matched.Atespace, matched.Name)
+	isCanonical := idx == canonicalIdx || canonicalIdx == -1
+	m := &ActorMatch{
+		Actor:     matched,
+		Raw:       rawReport.Actors[idx],
+		RawActors: rawReport.Actors,
+		Canonical: isCanonical,
+		Report:    report,
+	}
 	fullName := matched.Atespace + "/" + matched.Name
-	canonicalIdx := canonicalActorForName(report.Actors, matched.Atespace, matched.Name, idx)
 	for i, s := range report.Sessions {
 		mine := s.ActorUID != "" && s.ActorUID == matched.UID
 		if s.ActorUID == "" || matched.UID == "" {
-			mine = idx == canonicalIdx && s.Actor == fullName && (s.Atespace == "" || s.Atespace == matched.Atespace)
+			mine = isCanonical && s.Actor == fullName && (s.Atespace == "" || s.Atespace == matched.Atespace)
 		}
 		if mine {
 			m.Sessions = append(m.Sessions, rawReport.Sessions[i])
 			m.SessionCosts = append(m.SessionCosts, s)
-		}
-	}
-	for i, a := range report.Actors {
-		if i == idx || a.Note != "" || a.ParentAgentID == "" {
-			continue
-		}
-		if (matched.UID != "" && a.ParentAgentID == matched.UID) || (idx == canonicalIdx && a.ParentAgentID == fullName && a.Tenant == matched.Tenant) {
-			m.SubAgents = append(m.SubAgents, rawReport.Actors[i])
-			m.Children = append(m.Children, a)
 		}
 	}
 	return m, nil
@@ -682,9 +696,6 @@ func latestActorTimestamp(a ActorCost) string {
 }
 
 func preferActorForName(cand, curr ActorCost) bool {
-	if (cand.SubAgents > 0) != (curr.SubAgents > 0) {
-		return cand.SubAgents > 0
-	}
 	if (cand.Compute.OpenLeases > 0) != (curr.Compute.OpenLeases > 0) {
 		return cand.Compute.OpenLeases > 0
 	}
@@ -701,9 +712,11 @@ func preferActorForName(cand, curr ActorCost) bool {
 	return cand.UID > curr.UID
 }
 
-func canonicalActorForName(actors []ActorCost, atespace, name string, fallback int) int {
+// CanonicalActorIndex returns the index of the canonical cost record for
+// (atespace, name) in actors, or -1 if none matches.
+func CanonicalActorIndex(actors []ActorCost, atespace, name string) int {
 	if atespace == "" || name == "" {
-		return fallback
+		return -1
 	}
 	best := -1
 	for i, a := range actors {
@@ -713,9 +726,6 @@ func canonicalActorForName(actors []ActorCost, atespace, name string, fallback i
 		if best == -1 || preferActorForName(a, actors[best]) {
 			best = i
 		}
-	}
-	if best == -1 {
-		return fallback
 	}
 	return best
 }

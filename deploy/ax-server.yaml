@@ -136,12 +136,13 @@ spec:
             - name: AX_SNAPSHOTS_BUCKET
               value: "gs://dberkov-gke-dev3/ate-env/"
             # Send task lifecycle events (ax.task.state_changed: parent,
-            # budget, phase, outcome) to Agent FinOps through its
-            # OpenTelemetry Collector. ax-server sends no events when no
+            # budget, phase, outcome) to an OpenTelemetry Collector (for
+            # example GKE Managed OpenTelemetry exporting to Cloud Logging) for
+            # downstream task-tree joins. ax-server sends no events when no
             # OTLP endpoint is set. ax-server also sends the state of every
             # task again every --task-resync-interval (default 10m).
             # - name: OTEL_EXPORTER_OTLP_ENDPOINT
-            #   value: "http://finops-collector.ate-finops.svc:4317"
+            #   value: "http://otel-collector.opentelemetry.svc:4317"
             # - name: OTEL_EXPORTER_OTLP_INSECURE
             #   value: "true"
           ports:

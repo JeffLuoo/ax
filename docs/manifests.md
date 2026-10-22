@@ -43,7 +43,7 @@ spec:
 
 `spec.parent` puts a task in a task tree. It names another task in the same atespace, and that task must exist when you apply the child. `ax apply` rejects a parent that does not exist, a parent that is being deleted, and a task that names itself. A parent in another atespace is not possible, so a task tree never crosses an atespace.
 
-`spec.budget.maxUsd` is the spending limit that the task declares, in US dollars. It must be a finite number of 0 or more; 0 means no limit. AX stores the budget and sends it, with the parent, to Agent FinOps in the `ax.task.state_changed` event. `ax cost task <name>` shows the spend against the budget. AX does not stop a task that spends more than its budget.
+`spec.budget.maxUsd` is the spending limit that the task declares, in US dollars. It must be a finite number of 0 or more; 0 means no limit. AX stores the budget and sends it, with the parent, to an OpenTelemetry Collector in the `ax.task.state_changed` event for downstream joins. `ax cost task <name>` rolls up the task tree from AX's stored tasks and shows the spend against the budget. AX does not stop a task that spends more than its budget.
 
 ### Sandbox size
 

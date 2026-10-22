@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package events sends task lifecycle events from ax-server to Agent FinOps.
+// Package events sends task lifecycle events from ax-server to an
+// OpenTelemetry Collector.
 //
 // Each event is an OTLP log record named ax.task.state_changed. It carries the
-// task's place in the task tree, its budget, its phase, and its outcome, so
-// that FinOps can roll sub-task cost up to the parent task, compare spend with
-// the budget, and split cost by outcome. ax-server sends one when a task is
-// created, when its phase changes, when it is deleted, and when its outcome is
-// set. It also sends the current state of every task again at an interval
-// (the task resync), because the exporter drops an event when its queue is
-// full, and FinOps keeps task state in memory only.
+// task's place in the task tree, its budget, its phase, and its outcome, for
+// downstream task-tree, budget, and outcome joins. ax-server sends one when a
+// task is created, when its phase changes, when it is deleted, and when its
+// outcome is set. It also sends the current state of every task again at an
+// interval (the task resync), because the exporter drops an event when its
+// queue is full.
 package events
 
 import (
@@ -49,9 +49,9 @@ const OutcomeSourceSandbox = "sandbox"
 // removed. It is not a phase that a stored task can have.
 const PhaseDeleted = "Deleted"
 
-// Attribute names of a task lifecycle event. FinOps reads them by these exact
-// names; ate.atespace and ate.actor.name repeat the atespace and the task name
-// because Ax names a task's actor after the task.
+// Attribute names of a task lifecycle event. Downstream consumers read them by
+// these exact names; ate.atespace and ate.actor.name repeat the atespace and
+// the task name because Ax names a task's actor after the task.
 const (
 	AttrAtespace  = "ax.atespace"
 	AttrTaskName  = "ax.task.name"

@@ -196,7 +196,7 @@ func TestCostTask_ShowsBudgetSpendAndOutcome(t *testing.T) {
 		"Parent Task:        planner",
 		"Outcome:            Failed (self-reported: exit code 3, finished 2026-10-18T08:30:00Z)",
 		"Budget:             $0.500000",
-		"Spend (LLM+compute): own $0.600000 (120.0% of budget), tree $0.000000 (0.0%)  OVER BUDGET",
+		"Spend (LLM+compute): own $0.600000 (120.0% of budget), tree $0.600000 (120.0%)  OVER BUDGET",
 		"Cost basis: ESTIMATE — NOT RECONCILED",
 	} {
 		if !strings.Contains(out, want) {

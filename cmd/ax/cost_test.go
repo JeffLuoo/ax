@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net"
@@ -104,8 +105,8 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/v1/costs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		writeCostReport(w, r, finops.CostReport{
-			Since:           "2026-10-17T00:00:00Z",
-			GeneratedAt:     "2026-10-17T01:00:00Z",
+			Since:       "2026-10-17T00:00:00Z",
+			GeneratedAt: "2026-10-17T01:00:00Z",
 			Totals:      finops.Totals{Calls: 2, InputTokens: 2800, OutputTokens: 600, Cost: finops.MoneyMap{"USD": 0.015525}},
 			Compute:     finops.ComputeSummary{Leases: 2, LeaseSeconds: 20, VCPUSeconds: 10, GiBSeconds: 20, Cost: finops.MoneyMap{"USD": 0.000171}},
 			TotalCost:   finops.MoneyMap{"USD": 0.016046},
@@ -115,7 +116,6 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 					Name:                  "coding-parent-1",
 					UID:                   "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
 					Tenant:                "otel-bench",
-					SubAgents:             1,
 					Template:              "agent-template",
 					Class:                 "agent",
 					IsAgent:               true,
@@ -131,9 +131,6 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 					StorageCost:           finops.MoneyMap{"USD": 0.000350},
 					HostingCost:           finops.MoneyMap{"USD": 0.000453},
 					MeasuredHostingCost:   finops.MoneyMap{"USD": 0.000392},
-					TreeLLMCost:           finops.MoneyMap{"USD": 0.015525},
-					TreeComputeCost:       finops.MoneyMap{"USD": 0.000171},
-					TreeTotalCost:         finops.MoneyMap{"USD": 0.016046},
 					Models: []finops.ModelCost{
 						{
 							Provider:              "anthropic",
@@ -148,22 +145,20 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 					},
 				},
 				{
-					Atespace:      "otel-bench",
-					Name:          "coding-sub-1",
-					UID:           "a5cbff7e-3268-42c3-ab88-65d9c6c8a66e",
-					Tenant:        "otel-bench",
-					ParentAgentID: "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
-					Template:      "agent-template",
-					Class:         "agent",
-					IsAgent:       true,
-					Calls:         1,
-					InputTokens:   800,
-					OutputTokens:  200,
-					Cost:          finops.MoneyMap{"USD": 0.002438},
-					Compute:       finops.ComputeSummary{Leases: 1, LeaseSeconds: 8, VCPUSeconds: 4, GiBSeconds: 8, Cost: finops.MoneyMap{"USD": 0.000068}},
-					TotalCost:     finops.MoneyMap{"USD": 0.002856},
-					HostingCost:   finops.MoneyMap{"USD": 0.000068},
-					TreeTotalCost: finops.MoneyMap{"USD": 0.002856},
+					Atespace:     "otel-bench",
+					Name:         "coding-sub-1",
+					UID:          "a5cbff7e-3268-42c3-ab88-65d9c6c8a66e",
+					Tenant:       "otel-bench",
+					Template:     "agent-template",
+					Class:        "agent",
+					IsAgent:      true,
+					Calls:        1,
+					InputTokens:  800,
+					OutputTokens: 200,
+					Cost:         finops.MoneyMap{"USD": 0.002438},
+					Compute:      finops.ComputeSummary{Leases: 1, LeaseSeconds: 8, VCPUSeconds: 4, GiBSeconds: 8, Cost: finops.MoneyMap{"USD": 0.000068}},
+					TotalCost:    finops.MoneyMap{"USD": 0.002856},
+					HostingCost:  finops.MoneyMap{"USD": 0.000068},
 				},
 			},
 			Sessions: []finops.SessionCost{
@@ -303,11 +298,18 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 func TestRunCostCommands(t *testing.T) {
 	finopsSrv := newTestFinOpsHTTPServer(t)
 
-	// Start an in-memory AX gRPC server with coding-parent-1 in Running phase.
+	// Start an in-memory AX gRPC server with coding-parent-1 and coding-sub-1.
 	s := memory.NewStore()
 	if err := s.SaveTask(context.Background(), &v1alpha1.Task{
 		Metadata: &v1alpha1.ObjectMeta{Name: "coding-parent-1", Atespace: "otel-bench"},
-		Status:   &v1alpha1.TaskStatus{Phase: "Running", Actor: "coding-parent-1"},
+		Status:   &v1alpha1.TaskStatus{Id: "task-parent-1", Phase: "Running", Actor: "coding-parent-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveTask(context.Background(), &v1alpha1.Task{
+		Metadata: &v1alpha1.ObjectMeta{Name: "coding-sub-1", Atespace: "otel-bench"},
+		Spec:     &v1alpha1.TaskSpec{Parent: "coding-parent-1"},
+		Status:   &v1alpha1.TaskStatus{Id: "task-sub-1", ParentId: "task-parent-1", Phase: "Running", Actor: "coding-sub-1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +328,7 @@ func TestRunCostCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runCost list failed: %v", err)
 		}
-		for _, want := range []string{"NAME", "PHASE", "coding-parent-1", "Running", "$0.013540", "$0.016046", "Summary (atespace otel-bench, 2 rows)", "total=$0.016046", "Cost basis: ESTIMATE — NOT RECONCILED"} {
+		for _, want := range []string{"NAME", "PHASE", "coding-parent-1", "Running", "$0.013540", "$0.016396", "Summary (atespace otel-bench, 2 rows)", "total=$0.016046", "Cost basis: ESTIMATE — NOT RECONCILED"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("expected output to contain %q, got:\n%s", want, out)
 			}
@@ -392,4 +394,231 @@ func TestRunCostCommands(t *testing.T) {
 			t.Fatalf("unexpected focus CSV output:\n%s", csvOut)
 		}
 	})
+}
+
+func TestLocalTaskTreeRollup(t *testing.T) {
+	// FinOps reports only per-actor costs (no parentAgentId, subAgents, or treeTotalCost).
+	// Also put bogus treeTotalCost=99.0 and parentAgentId="bogus" on rows to prove
+	// the CLI ignores FinOps' tree fields and computes rollups from Ax tasks alone.
+	finopsBody := `{
+  "costBasis": "estimated",
+  "atespace": "team-a",
+  "totals": {"calls": 3, "cost": {"USD": 0.35}},
+  "compute": {"leases": 3, "cost": {"USD": 0.07}},
+  "totalCost": {"USD": 0.42},
+  "actors": [
+    {
+      "atespace": "team-a",
+      "name": "root",
+      "uid": "uid-root",
+      "isAgent": true,
+      "calls": 1,
+      "cost": {"USD": 0.10},
+      "compute": {"leases": 1, "cost": {"USD": 0.02}},
+      "totalCost": {"USD": 0.12},
+      "subAgents": 99,
+      "treeTotalCost": {"USD": 99.0}
+    },
+    {
+      "atespace": "team-a",
+      "name": "grandchild",
+      "uid": "uid-grandchild",
+      "isAgent": true,
+      "calls": 1,
+      "cost": {"USD": 0.20},
+      "compute": {"leases": 1, "cost": {"USD": 0.04}},
+      "totalCost": {"USD": 0.24},
+      "parentAgentId": "bogus"
+    },
+    {
+      "atespace": "team-a",
+      "name": "stale-child",
+      "uid": "uid-stale",
+      "isAgent": true,
+      "calls": 1,
+      "cost": {"USD": 0.05},
+      "compute": {"leases": 1, "cost": {"USD": 0.01}},
+      "totalCost": {"USD": 0.06},
+      "parentAgentId": "team-a/root"
+    },
+    {
+      "atespace": "team-b",
+      "name": "other-child",
+      "uid": "uid-other",
+      "isAgent": true,
+      "calls": 1,
+      "cost": {"USD": 0.50},
+      "compute": {"leases": 1, "cost": {"USD": 0.10}},
+      "totalCost": {"USD": 0.60}
+    },
+    {
+      "atespace": "team-a",
+      "name": "cycle-a",
+      "uid": "uid-cycle-a",
+      "isAgent": true,
+      "cost": {"USD": 0.01},
+      "compute": {"cost": {"USD": 0.01}},
+      "totalCost": {"USD": 0.02}
+    },
+    {
+      "atespace": "team-a",
+      "name": "cycle-b",
+      "uid": "uid-cycle-b",
+      "isAgent": true,
+      "cost": {"USD": 0.02},
+      "compute": {"cost": {"USD": 0.01}},
+      "totalCost": {"USD": 0.03}
+    }
+  ]
+}`
+	srv := rawServer(t, map[string]string{"/v1/costs": finopsBody})
+
+	// Task tree in ax-server:
+	// - root (id: id-root-v2) -> mid-unpriced (id: id-mid, parent_id: id-root-v2, NO FinOps actor)
+	//   -> grandchild (id: id-gc, parent_id: id-mid)
+	// - stale-child has spec.parent="root" but status.parent_id="id-root-v1" (recreated parent guard!)
+	// - other-child is in team-b with spec.parent="root" and parent_id="id-root-v2" (same-atespace guard!)
+	// - cycle-a <-> cycle-b form a cycle in stored tasks (cycle safety!)
+	tasks := []*v1alpha1.Task{
+		{
+			Metadata: &v1alpha1.ObjectMeta{Name: "root", Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Budget: &v1alpha1.Budget{MaxUsd: 0.30}},
+			Status:   &v1alpha1.TaskStatus{Id: "id-root-v2", Phase: "Running"},
+		},
+		{
+			Metadata: &v1alpha1.ObjectMeta{Name: "mid-unpriced", Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Parent: "root"},
+			Status:   &v1alpha1.TaskStatus{Id: "id-mid", ParentId: "id-root-v2", Phase: "Running"},
+		},
+		{
+			Metadata: &v1alpha1.ObjectMeta{Name: "grandchild", Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Parent: "mid-unpriced"},
+			Status:   &v1alpha1.TaskStatus{Id: "id-gc", ParentId: "id-mid", Phase: "Completed"},
+		},
+		{
+			Metadata: &v1alpha1.ObjectMeta{Name: "stale-child", Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Parent: "root"},
+			Status:   &v1alpha1.TaskStatus{Id: "id-stale", ParentId: "id-root-v1", Phase: "Completed"},
+		},
+		{
+			Metadata: &v1alpha1.ObjectMeta{Name: "other-child", Atespace: "team-b"},
+			Spec:     &v1alpha1.TaskSpec{Parent: "root"},
+			Status:   &v1alpha1.TaskStatus{Id: "id-other", ParentId: "id-root-v2", Phase: "Running"},
+		},
+		{
+			Metadata: &v1alpha1.ObjectMeta{Name: "cycle-a", Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Parent: "cycle-b"},
+			Status:   &v1alpha1.TaskStatus{Id: "id-ca", ParentId: "id-cb", Phase: "Running"},
+		},
+		{
+			Metadata: &v1alpha1.ObjectMeta{Name: "cycle-b", Atespace: "team-a"},
+			Spec:     &v1alpha1.TaskSpec{Parent: "cycle-a"},
+			Status:   &v1alpha1.TaskStatus{Id: "id-cb", ParentId: "id-ca", Phase: "Running"},
+		},
+	}
+	ax := axServer(t, tasks...)
+
+	// 1. `ax cost task root`:
+	// Own = $0.12 (LLM $0.10 + compute $0.02).
+	// Valid descendants = mid-unpriced ($0) + grandchild ($0.24 = LLM $0.20 + compute $0.04).
+	// stale-child ($0.06) and other-child ($0.60) must be excluded.
+	// Total tree = $0.36 (LLM $0.30 + compute $0.06), 2 sub-agents, OVER BUDGET (with sub-agents) against $0.30.
+	out, err := captureStdout(t, func() error {
+		return runCost(srv.URL, ax, "team-a", true, []string{"task", "root"})
+	})
+	if err != nil {
+		t.Fatalf("ax cost task root failed: %v", err)
+	}
+	for _, want := range []string{
+		"Sub-Agents:         2",
+		"Spend (LLM+compute): own $0.120000 (40.0% of budget), tree $0.360000 (120.0%)  OVER BUDGET (with sub-agents)",
+		"Tree (Own + 2 Sub-Agents)",
+		"$0.300000",
+		"$0.060000",
+		"$0.360000",
+		"mid-unpriced",
+		"grandchild",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("root detail output lacks %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"stale-child", "other-child", "$99.000000", "Parent Agent:"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("root detail output unexpectedly contains %q:\n%s", unwanted, out)
+		}
+	}
+
+	// 2. `ax cost task mid-unpriced`:
+	// mid-unpriced has NO FinOps actor record, but exists in ax-server and has
+	// child `grandchild` ($0.24) in FinOps. It falls back gracefully to $0 own
+	// cost and $0.24 tree cost.
+	out, err = captureStdout(t, func() error {
+		return runCost(srv.URL, ax, "team-a", true, []string{"task", "mid-unpriced"})
+	})
+	if err != nil {
+		t.Fatalf("ax cost task mid-unpriced (missing FinOps actor) failed: %v", err)
+	}
+	for _, want := range []string{
+		"Name:               mid-unpriced",
+		"Task Phase:         Running",
+		"Sub-Agents:         1",
+		"Parent Task:        root",
+		"Spend (LLM+compute): own $0.000000, tree $0.240000",
+		"Tree (Own + 1 Sub-Agents)",
+		"grandchild",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("mid-unpriced detail output lacks %q:\n%s", want, out)
+		}
+	}
+
+	// 3. `ax cost task cycle-a`:
+	// Cycle cycle-a <-> cycle-b terminates and counts cycle-b once ($0.02 + $0.03 = $0.05).
+	out, err = captureStdout(t, func() error {
+		return runCost(srv.URL, ax, "team-a", true, []string{"task", "cycle-a"})
+	})
+	if err != nil {
+		t.Fatalf("ax cost task cycle-a failed: %v", err)
+	}
+	for _, want := range []string{
+		"Sub-Agents:         1",
+		"Spend (LLM+compute): own $0.020000, tree $0.050000",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cycle-a detail output lacks %q:\n%s", want, out)
+		}
+	}
+
+	// 4. `ax cost -a team-a -o wide` list table shows local sub-agent count (2) and tree total ($0.360000) for root,
+	// and ignores FinOps' bogus 99 subAgents / $99.000000 treeTotalCost.
+	out, err = captureStdout(t, func() error {
+		return runCost(srv.URL, ax, "team-a", true, []string{"-o", "wide"})
+	})
+	if err != nil {
+		t.Fatalf("ax cost -o wide failed: %v", err)
+	}
+	if !strings.Contains(out, "$0.360000") || strings.Contains(out, "$99.000000") {
+		t.Errorf("wide list did not use local tree rollup:\n%s", out)
+	}
+
+	// 5. `ax describe task` (via tryPrintTaskDescribeCost) computes local tree rollup,
+	// including when the described parent task (`mid-unpriced`) has no FinOps actor of its own.
+	taskMap := map[string]*v1alpha1.Task{}
+	for _, tk := range tasks {
+		if tk.GetMetadata().GetAtespace() == "team-a" {
+			taskMap[taskKey("team-a", tk.GetMetadata().GetName())] = tk
+		}
+	}
+	var descBuf bytes.Buffer
+	tryPrintTaskDescribeCost(&descBuf, srv.URL, tasks[0], taskMap)
+	if !strings.Contains(descBuf.String(), "Tree (Own + 2 Sub-Agents)") || !strings.Contains(descBuf.String(), "$0.360000") {
+		t.Errorf("describe root lacks local tree rollup:\n%s", descBuf.String())
+	}
+
+	descBuf.Reset()
+	tryPrintTaskDescribeCost(&descBuf, srv.URL, tasks[1], taskMap)
+	if !strings.Contains(descBuf.String(), "Tree (Own + 1 Sub-Agents)") || !strings.Contains(descBuf.String(), "$0.240000") {
+		t.Errorf("describe mid-unpriced lacks local tree rollup:\n%s", descBuf.String())
+	}
 }

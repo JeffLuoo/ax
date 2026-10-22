@@ -775,7 +775,9 @@ func runDescribe(serverURL, atespace, finopsServer, kubeContext string, args []s
 		_ = w.Flush()
 	}
 
-	tryPrintTaskDescribeCost(os.Stdout, resolveOptionalFinOpsURL(finopsServer, kubeContext), task)
+	if finopsURL := resolveOptionalFinOpsURL(finopsServer, kubeContext); finopsURL != "" {
+		tryPrintTaskDescribeCost(os.Stdout, finopsURL, task, lookupAXTasks(ctx, serverURL, firstNonEmpty(taskAtespace, "default")))
+	}
 
 	return nil
 }

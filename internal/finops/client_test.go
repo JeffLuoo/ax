@@ -165,8 +165,8 @@ func TestClientGetActorCost(t *testing.T) {
 	if len(m.SessionCosts) != 1 || m.SessionCosts[0].SessionID != "conv-live-e2e-001" || len(m.Sessions) != 1 {
 		t.Fatalf("unexpected sessions: %+v", m.SessionCosts)
 	}
-	if len(m.Children) != 1 || m.Children[0].Name != "coding-sub-1" || len(m.SubAgents) != 1 {
-		t.Fatalf("unexpected children: %+v", m.Children)
+	if !m.Canonical || len(m.RawActors) != 2 {
+		t.Fatalf("expected canonical match with 2 raw actors, got canonical=%t len(RawActors)=%d", m.Canonical, len(m.RawActors))
 	}
 	if !strings.Contains(string(m.Raw), `"measuredHostingCost"`) {
 		t.Errorf("raw actor row lost fields: %s", m.Raw)
@@ -297,7 +297,7 @@ func TestClientSendsAtespaceAndKeepsRawBody(t *testing.T) {
 	}
 }
 
-func TestClientGetActorCost_RecreatedParentSubAgentsMatchCanonicalOnly(t *testing.T) {
+func TestClientGetActorCost_RecreatedActorCanonicalAndSessions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -307,7 +307,6 @@ func TestClientGetActorCost_RecreatedParentSubAgentsMatchCanonicalOnly(t *testin
       "name": "ax-parent-r2",
       "uid": "e32d3de1-4053-4c32-8068-0fa736b02d69",
       "tenant": "tenant-alpha",
-      "subAgents": 0,
       "compute": {"lastLease": "2026-10-18T16:23:19Z"}
     },
     {
@@ -315,15 +314,14 @@ func TestClientGetActorCost_RecreatedParentSubAgentsMatchCanonicalOnly(t *testin
       "name": "ax-parent-r2",
       "uid": "b1cb5cc0-5acc-4c1f-8657-1703688f5883",
       "tenant": "tenant-alpha",
-      "subAgents": 1,
       "compute": {"lastLease": "2026-10-18T16:28:12Z"}
-    },
+    }
+  ],
+  "sessions": [
     {
+      "sessionId": "s-by-name",
       "atespace": "otel-bench",
-      "name": "ax-child-r2",
-      "uid": "e946925b-9f51-4ef4-b9d8-18fd0d9ca8a1",
-      "tenant": "tenant-alpha",
-      "parentAgentId": "otel-bench/ax-parent-r2"
+      "actor": "otel-bench/ax-parent-r2"
     }
   ]
 }`))
@@ -337,15 +335,15 @@ func TestClientGetActorCost_RecreatedParentSubAgentsMatchCanonicalOnly(t *testin
 	if err != nil {
 		t.Fatalf("old parent lookup failed: %v", err)
 	}
-	if len(oldParent.Children) != 0 {
-		t.Errorf("old superseded parent got %d children (%+v), want 0", len(oldParent.Children), oldParent.Children)
+	if oldParent.Canonical || len(oldParent.SessionCosts) != 0 {
+		t.Errorf("old superseded parent got canonical=%t sessions=%+v, want false and 0 sessions", oldParent.Canonical, oldParent.SessionCosts)
 	}
 
 	newParent, err := c.GetActorCost(ctx, "otel-bench", true, "b1cb5cc0")
 	if err != nil {
 		t.Fatalf("new parent lookup failed: %v", err)
 	}
-	if len(newParent.Children) != 1 || newParent.Children[0].UID != "e946925b-9f51-4ef4-b9d8-18fd0d9ca8a1" {
-		t.Errorf("new canonical parent got children %+v, want [e946925b]", newParent.Children)
+	if !newParent.Canonical || len(newParent.SessionCosts) != 1 || newParent.SessionCosts[0].SessionID != "s-by-name" {
+		t.Errorf("new canonical parent got canonical=%t sessions=%+v, want true and [s-by-name]", newParent.Canonical, newParent.SessionCosts)
 	}
 }

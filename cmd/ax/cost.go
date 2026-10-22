@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -189,11 +190,10 @@ func runCost(finopsURL, axServerURL, atespace string, atespaceExplicit bool, arg
 		return renderFocusReport(out, focus)
 
 	case "get":
-		m, err := client.GetActorCost(ctx, atespace, atespaceExplicit && !opts.allAtespaces, opts.target)
+		m, task, err := resolveActorDetail(ctx, client, axServerURL, atespace, atespaceExplicit && !opts.allAtespaces, opts.target)
 		if err != nil {
 			return err
 		}
-		task := lookupAXTask(ctx, axServerURL, m.Actor.Atespace, m.Actor.Name)
 		return renderActorDetail(out, m, task, opts.output)
 
 	default:
@@ -249,7 +249,7 @@ func lookupAXTasks(ctx context.Context, axServerURL, atespace string) map[string
 		}
 		for _, t := range resp.Tasks {
 			if t.GetMetadata() != nil {
-				tasks[t.GetMetadata().GetAtespace()+"/"+t.GetMetadata().GetName()] = t
+				tasks[taskKey(t.GetMetadata().GetAtespace(), t.GetMetadata().GetName())] = t
 			}
 		}
 		if len(resp.Tasks) < page {
@@ -274,6 +274,241 @@ func lookupAXTask(ctx context.Context, axServerURL, atespace, name string) *v1al
 		return nil
 	}
 	return t
+}
+
+func taskKey(atespace, name string) string {
+	return firstNonEmpty(atespace, "default") + "/" + name
+}
+
+func addMoney(dst finops.MoneyMap, srcs ...finops.MoneyMap) {
+	for _, src := range srcs {
+		for k, v := range src {
+			dst[k] += v
+		}
+	}
+}
+
+func roundMoney(m finops.MoneyMap) finops.MoneyMap {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(finops.MoneyMap, len(m))
+	for k, v := range m {
+		out[k] = math.Round(v*1e12) / 1e12
+	}
+	return out
+}
+
+// buildTaskChildren builds a same-atespace parent -> sorted child keys map from
+// Ax tasks. A child links to spec.parent only when the parent exists in the
+// same atespace and status.parent_id matches the parent's status.id, so a
+// recreated parent with a reused name does not inherit old children.
+func buildTaskChildren(tasks map[string]*v1alpha1.Task) map[string][]string {
+	if len(tasks) == 0 {
+		return nil
+	}
+	children := map[string][]string{}
+	for _, t := range tasks {
+		if t.GetMetadata() == nil {
+			continue
+		}
+		ns := firstNonEmpty(t.GetMetadata().GetAtespace(), "default")
+		name := strings.TrimSpace(t.GetMetadata().GetName())
+		parentName := strings.TrimSpace(t.GetSpec().GetParent())
+		if name == "" || parentName == "" || parentName == name || strings.Contains(parentName, "/") {
+			continue
+		}
+		parentKey := taskKey(ns, parentName)
+		p := tasks[parentKey]
+		if p == nil {
+			continue
+		}
+		if t.GetStatus().GetParentId() != p.GetStatus().GetId() {
+			continue
+		}
+		children[parentKey] = append(children[parentKey], taskKey(ns, name))
+	}
+	for k := range children {
+		sort.Strings(children[k])
+	}
+	return children
+}
+
+// taskDescendants returns the keys ("<atespace>/<name>") of all descendants of
+// rootKey in pre-order DFS, guarding against cycles.
+func taskDescendants(children map[string][]string, rootKey string) []string {
+	if len(children) == 0 {
+		return nil
+	}
+	visited := map[string]bool{rootKey: true}
+	var out []string
+	var walk func(k string)
+	walk = func(k string) {
+		for _, c := range children[k] {
+			if visited[c] {
+				continue
+			}
+			visited[c] = true
+			out = append(out, c)
+			walk(c)
+		}
+	}
+	walk(rootKey)
+	return out
+}
+
+// rollupActorTree computes a's sub-agent count and tree totals from the Ax task
+// tree and per-actor FinOps costs, falling back to a zero ActorCost when FinOps
+// lacks a cost record for a descendant task.
+func rollupActorTree(a *finops.ActorCost, isCanonical bool, actors []finops.ActorCost, rawActors []json.RawMessage, children map[string][]string) ([]finops.ActorCost, []json.RawMessage) {
+	if a == nil || a.Note != "" {
+		return nil, nil
+	}
+	llm := finops.MoneyMap{}
+	comp := finops.MoneyMap{}
+	tot := finops.MoneyMap{}
+	addMoney(llm, a.Cost)
+	addMoney(comp, a.Compute.Cost)
+	addMoney(tot, a.TotalCost)
+
+	var descActors []finops.ActorCost
+	var descRaw []json.RawMessage
+	if isCanonical {
+		rootKey := taskKey(a.Atespace, a.Name)
+		for _, descKey := range taskDescendants(children, rootKey) {
+			ns, name, _ := strings.Cut(descKey, "/")
+			cIdx := finops.CanonicalActorIndex(actors, ns, name)
+			if cIdx >= 0 {
+				ca := actors[cIdx]
+				addMoney(llm, ca.Cost)
+				addMoney(comp, ca.Compute.Cost)
+				addMoney(tot, ca.TotalCost)
+				descActors = append(descActors, ca)
+				if cIdx < len(rawActors) {
+					descRaw = append(descRaw, rawActors[cIdx])
+				} else if b, err := json.Marshal(ca); err == nil {
+					descRaw = append(descRaw, b)
+				}
+			} else {
+				zero := finops.ActorCost{
+					Atespace: ns,
+					Name:     name,
+					Class:    "agent",
+					IsAgent:  true,
+				}
+				descActors = append(descActors, zero)
+				if b, err := json.Marshal(zero); err == nil {
+					descRaw = append(descRaw, b)
+				}
+			}
+		}
+	}
+	a.SubAgents = len(descActors)
+	a.TreeLLMCost = roundMoney(llm)
+	a.TreeComputeCost = roundMoney(comp)
+	a.TreeTotalCost = roundMoney(tot)
+	return descActors, descRaw
+}
+
+func applyReportTaskRollups(report *finops.CostReport, tasks map[string]*v1alpha1.Task) {
+	if report == nil {
+		return
+	}
+	children := buildTaskChildren(tasks)
+	for i := range report.Actors {
+		a := &report.Actors[i]
+		if a.Note != "" {
+			continue
+		}
+		cIdx := finops.CanonicalActorIndex(report.Actors, a.Atespace, a.Name)
+		isCanonical := i == cIdx || cIdx == -1
+		rollupActorTree(a, isCanonical, report.Actors, nil, children)
+	}
+}
+
+func resolveActorDetail(ctx context.Context, client *finops.Client, axServerURL, atespace string, atespaceExplicit bool, target string) (*finops.ActorMatch, *v1alpha1.Task, error) {
+	m, err := client.GetActorCost(ctx, atespace, atespaceExplicit, target)
+	if err == nil {
+		tasks := lookupAXTasks(ctx, axServerURL, m.Actor.Atespace)
+		task := tasks[taskKey(m.Actor.Atespace, m.Actor.Name)]
+		if task == nil && len(tasks) == 0 {
+			task = lookupAXTask(ctx, axServerURL, m.Actor.Atespace, m.Actor.Name)
+			if task != nil {
+				tasks = map[string]*v1alpha1.Task{taskKey(m.Actor.Atespace, m.Actor.Name): task}
+			}
+		}
+		children := buildTaskChildren(tasks)
+		m.Children, m.SubAgents = rollupActorTree(m.Actor, m.Canonical, m.Report.Actors, m.RawActors, children)
+		return m, task, nil
+	}
+
+	var notFound *finops.NotFoundError
+	if !errors.As(err, &notFound) || axServerURL == "" {
+		return nil, nil, err
+	}
+
+	// FinOps lacks a record for this actor; fall back to the task in ax-server
+	// when it exists, with $0 own cost and any descendants' FinOps costs.
+	targetAtespace := atespace
+	targetName := strings.TrimSpace(target)
+	if parts := strings.SplitN(targetName, "/", 2); len(parts) == 2 {
+		targetAtespace, targetName, atespaceExplicit = parts[0], parts[1], true
+	}
+	task := lookupAXTask(ctx, axServerURL, targetAtespace, targetName)
+	var tasks map[string]*v1alpha1.Task
+	if task == nil && !atespaceExplicit {
+		allTasks := lookupAXTasks(ctx, axServerURL, "")
+		var matches []*v1alpha1.Task
+		for _, t := range allTasks {
+			if t.GetMetadata().GetName() == targetName {
+				matches = append(matches, t)
+			}
+		}
+		if len(matches) == 1 {
+			task = matches[0]
+			targetAtespace = firstNonEmpty(task.GetMetadata().GetAtespace(), "default")
+			tasks = allTasks
+		}
+	}
+	if task == nil {
+		return nil, nil, err
+	}
+	targetAtespace = firstNonEmpty(task.GetMetadata().GetAtespace(), targetAtespace, "default")
+	targetName = firstNonEmpty(task.GetMetadata().GetName(), targetName)
+	if tasks == nil {
+		tasks = lookupAXTasks(ctx, axServerURL, targetAtespace)
+	}
+	if tasks == nil {
+		tasks = map[string]*v1alpha1.Task{}
+	}
+	tasks[taskKey(targetAtespace, targetName)] = task
+
+	report, raw, rErr := client.GetCosts(ctx, targetAtespace)
+	if rErr != nil {
+		return nil, nil, rErr
+	}
+	var rawReport struct {
+		Actors []json.RawMessage `json:"actors"`
+	}
+	_ = json.Unmarshal(raw, &rawReport)
+
+	actor := &finops.ActorCost{
+		Atespace: targetAtespace,
+		Name:     targetName,
+		Class:    "agent",
+		IsAgent:  true,
+	}
+	rawActor, _ := json.Marshal(actor)
+	m = &finops.ActorMatch{
+		Actor:     actor,
+		Raw:       rawActor,
+		RawActors: rawReport.Actors,
+		Canonical: true,
+		Report:    report,
+	}
+	children := buildTaskChildren(tasks)
+	m.Children, m.SubAgents = rollupActorTree(m.Actor, true, report.Actors, rawReport.Actors, children)
+	return m, task, nil
 }
 
 // taskView is what the CLI shows about an actor's task: the AX server's
@@ -320,6 +555,7 @@ func viewTask(a *finops.ActorCost, task *v1alpha1.Task) *taskView {
 func overBudget(spend, budget float64) bool { return budget > 0 && spend > budget }
 
 func renderCostList(out io.Writer, report *finops.CostReport, scope string, tasks map[string]*v1alpha1.Task, wide bool) error {
+	applyReportTaskRollups(report, tasks)
 	rows := report.Actors
 	serverFiltered := scope == "" || report.Atespace == scope
 	if !serverFiltered {
@@ -546,9 +782,6 @@ func renderActorDetail(out io.Writer, m *finops.ActorMatch, task *v1alpha1.Task,
 	if a.Tenant != "" {
 		fmt.Fprintf(out, "Tenant:             %s (ate.finops.tenant)\n", a.Tenant)
 	}
-	if a.ParentAgentID != "" {
-		fmt.Fprintf(out, "Parent Agent:       %s (gen_ai.agent.parent_id)\n", a.ParentAgentID)
-	}
 	fmt.Fprintf(out, "Sub-Agents:         %d\n", a.SubAgents)
 	printTaskBudget(out, a, viewTask(a, task))
 
@@ -608,8 +841,8 @@ func printTaskBudget(out io.Writer, a *finops.ActorCost, v *taskView) {
 		formatUSD(own), 100*own/v.budgetUSD, formatUSD(tree), 100*tree/v.budgetUSD, flag)
 }
 func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finops.SessionCost, children []finops.ActorCost) {
-	// The server computes every total; the CLI shows its numbers and does not
-	// fill a missing one with its own sum.
+	// Per-actor costs come from FinOps; tree totals are rolled up from the Ax
+	// task tree.
 	bookedCompute := a.Compute.Cost.USD()
 	measuredCompute := a.MeasuredComputeCost.USD()
 	storageUSD := a.StorageCost.USD()
@@ -675,12 +908,12 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 	_ = tw.Flush()
 
 	if len(children) > 0 {
-		fmt.Fprintln(out, "\nSub-Agents (gen_ai.agent.parent_id names this actor):")
+		fmt.Fprintln(out, "\nSub-Agents:")
 		cw := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
 		fmt.Fprintln(cw, "  NAME\tATESPACE\tUID\tTEMPLATE\tCALLS\tLLM ($)\tHOSTING ($)\tTOTAL ($)")
 		for _, c := range children {
 			fmt.Fprintf(cw, "  %s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
-				c.Name, c.Atespace, c.UID, c.Template, c.Calls,
+				c.Name, c.Atespace, firstNonEmpty(c.UID, "-"), firstNonEmpty(c.Template, "-"), c.Calls,
 				formatUSD(c.Cost.USD()), formatUSD(c.HostingCost.USD()), formatUSD(c.TotalCost.USD()))
 		}
 		_ = cw.Flush()
@@ -994,8 +1227,9 @@ func resolveOptionalFinOpsURL(finopsServer, kubeContext string) string {
 }
 
 // tryPrintTaskDescribeCost appends FinOps cost attribution to `ax describe task`
-// when a FinOps server is reachable and has records for the task's actor.
-func tryPrintTaskDescribeCost(out io.Writer, finopsURL string, task *v1alpha1.Task) {
+// when a FinOps server is reachable and has records for the task's actor or
+// its sub-agent tasks.
+func tryPrintTaskDescribeCost(out io.Writer, finopsURL string, task *v1alpha1.Task, allTasks ...map[string]*v1alpha1.Task) {
 	if finopsURL == "" || task.GetMetadata() == nil {
 		return
 	}
@@ -1003,16 +1237,63 @@ func tryPrintTaskDescribeCost(out io.Writer, finopsURL string, task *v1alpha1.Ta
 	defer cancel()
 	client := finops.NewClient(finopsURL, nil)
 	atespace := firstNonEmpty(task.GetMetadata().GetAtespace(), "default")
+	name := task.GetMetadata().GetName()
+	var taskMap map[string]*v1alpha1.Task
+	if len(allTasks) > 0 {
+		taskMap = allTasks[0]
+	}
+	if taskMap != nil {
+		taskMap[taskKey(atespace, name)] = task
+	}
+	children := buildTaskChildren(taskMap)
+
 	// The actor is named after the task, in the task's atespace.
-	m, err := client.GetActorCost(ctx, atespace, true, task.GetMetadata().GetName())
+	m, err := client.GetActorCost(ctx, atespace, true, name)
 	var amb *finops.AmbiguousError
 	if errors.As(err, &amb) {
 		fmt.Fprintf(out, "\nFinOps: %v\n", err)
 		return
 	}
 	if err != nil {
-		return
+		var notFound *finops.NotFoundError
+		if !errors.As(err, &notFound) || len(children) == 0 {
+			return
+		}
+		report, raw, rErr := client.GetCosts(ctx, atespace)
+		if rErr != nil {
+			return
+		}
+		hasDescendantCost := false
+		for _, descKey := range taskDescendants(children, taskKey(atespace, name)) {
+			ns, dName, _ := strings.Cut(descKey, "/")
+			if finops.CanonicalActorIndex(report.Actors, ns, dName) >= 0 {
+				hasDescendantCost = true
+				break
+			}
+		}
+		if !hasDescendantCost {
+			return
+		}
+		var rawReport struct {
+			Actors []json.RawMessage `json:"actors"`
+		}
+		_ = json.Unmarshal(raw, &rawReport)
+		actor := &finops.ActorCost{
+			Atespace: atespace,
+			Name:     name,
+			Class:    "agent",
+			IsAgent:  true,
+		}
+		rawActor, _ := json.Marshal(actor)
+		m = &finops.ActorMatch{
+			Actor:     actor,
+			Raw:       rawActor,
+			RawActors: rawReport.Actors,
+			Canonical: true,
+			Report:    report,
+		}
 	}
+	m.Children, m.SubAgents = rollupActorTree(m.Actor, m.Canonical, m.Report.Actors, m.RawActors, children)
 	fmt.Fprintln(out, "\nFinOps Cost:")
 	printTaskBudget(out, m.Actor, viewTask(m.Actor, task))
 	printActorCostSections(out, m.Actor, m.SessionCosts, m.Children)

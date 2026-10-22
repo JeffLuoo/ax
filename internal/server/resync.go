@@ -54,9 +54,8 @@ type TaskResyncOptions struct {
 // opts.Interval is zero or less.
 //
 // The task event exporter drops an event when its queue is full, and it does
-// not send that event again. Agent FinOps keeps task state in memory only, so
-// after a FinOps or collector restart it does not know a task until the task
-// changes. The resync repairs both cases within one interval.
+// not send that event again. The resync repairs dropped events within one
+// interval.
 func (s *Server) RunTaskResync(ctx context.Context, opts TaskResyncOptions) {
 	if opts.Interval <= 0 {
 		return

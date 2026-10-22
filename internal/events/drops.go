@@ -66,7 +66,7 @@ func (s dropSink) Info(_ int, msg string, kv ...any) {
 			}
 		}
 		total := dropped.Add(n)
-		slog.Warn("the task event queue was full; FinOps did not get some task events until the next task resync", "dropped", n, "droppedTotal", total)
+		slog.Warn("the task event queue was full; some task events were dropped until the next task resync", "dropped", n, "droppedTotal", total)
 		return
 	}
 	slog.Warn("opentelemetry: "+msg, append(append([]any{}, s.values...), kv...)...)

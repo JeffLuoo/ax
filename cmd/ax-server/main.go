@@ -79,7 +79,7 @@ func main() {
 	flag.StringVar(&routerAddr, "router-addr", os.Getenv("ATENET_ROUTER_ADDR"), "atenet router host:port, for reading each running task's command state (default $ATENET_ROUTER_ADDR)")
 	flag.DurationVar(&outcomePollInterval, "outcome-poll-interval", server.DefaultOutcomePollInterval, "Time between reads of the command state of running tasks; 0 turns task outcomes off")
 	flag.IntVar(&outcomePollConcurrency, "outcome-poll-concurrency", server.DefaultOutcomePollConcurrency, "Most command state requests in flight at a time")
-	flag.DurationVar(&taskResyncInterval, "task-resync-interval", server.DefaultTaskResyncInterval, "Time between two sends of the current state of every task to Agent FinOps, which repair dropped task events and a FinOps restart; 0 turns the resync off")
+	flag.DurationVar(&taskResyncInterval, "task-resync-interval", server.DefaultTaskResyncInterval, "Time between two sends of the current state of every task over OTLP, which repair dropped task events; 0 turns the resync off")
 	flag.BoolVar(&authEnabled, "auth", true, "Verify each caller's bearer token with a Kubernetes TokenReview and check each RPC with a SubjectAccessReview; false lets every caller do everything")
 	flag.StringVar(&authAudiences, "auth-audiences", auth.DefaultAudience, "Comma-separated audiences that a caller's token must be for")
 	flag.BoolVar(&authAllowAPIServer, "auth-allow-apiserver-tokens", false, "Also accept a token for the Kubernetes API server's own audiences, such as a kubeconfig credential")
@@ -140,7 +140,7 @@ func main() {
 		reconciler = tr
 	}
 
-	// Task events for Agent FinOps go out only when an OTLP endpoint is set
+	// Task events go out only when an OTLP endpoint is set
 	// (OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_LOGS_ENDPOINT).
 	emitter, err := events.NewFromEnv(context.Background())
 	if err != nil {

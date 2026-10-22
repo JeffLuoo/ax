@@ -38,7 +38,7 @@ The effect on existing tasks:
 
 ## Task events
 
-When `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` is set, `ax-server` now sends task events to Agent FinOps. It also sends the current state of every task when it starts, and then every `--task-resync-interval` (default `10m`; `0` turns it off). After the upgrade, FinOps gets the parent and the budget of each existing task within one interval.
+When `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` is set, `ax-server` now sends task events (`ax.task.state_changed`) to an OpenTelemetry Collector for downstream task-tree joins. It also sends the current state of every task when it starts, and then every `--task-resync-interval` (default `10m`; `0` turns it off).
 
 ## Access control
 

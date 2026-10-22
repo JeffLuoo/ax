@@ -149,7 +149,7 @@ func TestPollOutcomes_SetsOutcomeOfExitedRunningTasks(t *testing.T) {
 		t.Error("the poller asked about a task that already has an outcome")
 	}
 
-	// Watchers see the update, and FinOps gets an event with the outcome.
+	// Watchers see the update, and a task event is emitted with the outcome.
 	select {
 	case w := <-watch:
 		if w.GetStatus().GetOutcome() != v1alpha1.OutcomeCompleted {
