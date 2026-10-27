@@ -259,24 +259,25 @@ func TestDescribeTaskCost_UsesTheTasksAtespaceAndReportsAmbiguity(t *testing.T) 
 	}
 }
 
-func TestCostFocus_LabelsAnEstimatedOrigin(t *testing.T) {
+func TestCostFocus_RendersAllocationKeys(t *testing.T) {
 	srv := rawServer(t, map[string]string{"/v1/costs/focus": `{
-	  "originCharge": {"OriginChargeId": "charge-pool-all", "BillingCurrency": "USD", "ServiceName": "Kubernetes Engine", "ResourceName": "default",
-	    "EffectiveCost": 0.5, "BilledCost": 0, "Tags": {"finops.agent-substrate.dev/estimated": "true"}},
-	  "charges": [
-	    {"OriginChargeId": "charge-pool-all", "EffectiveCost": 0.2, "BilledCost": 0, "AllocatedMethodId": "booked-share", "AllocatedResourceId": "u1",
-	     "AllocatedResourceName": "team-a/agent-1", "AllocatedTags": {"tenant": "team-a", "is_agent": "true"}},
-	    {"OriginChargeId": "charge-pool-all", "EffectiveCost": 0.3, "BilledCost": 0, "AllocatedMethodId": "booked-share", "AllocatedResourceId": "_unused_capacity"}
-	  ],
-	  "auxiliaryCharges": [
-	    {"OriginChargeId": "tokens", "EffectiveCost": 0.4, "AllocatedMethodId": "token-usage", "AllocatedResourceId": "u1", "AllocatedResourceName": "team-a/agent-1"}
-	  ],
-	  "reconciliation": {"resourceId": "gke-worker-pool/all", "pool": "ate-workers/default", "estimated": true, "originCost": 0.5, "allocated": 0.2,
-	    "unallocated": 0.3, "agents": 1, "unsizedLeases": 0, "expectedIdle": 0.29, "priceGap": 0.01,
-	    "coverageLeaseHours": 2, "coverageActivationHours": 2.5, "coverageRatio": 0.8, "estimatedLeases": 1},
-	  "reconciliations": [
-	    {"pool": "ate-workers/default", "estimated": true, "originCost": 0.3, "allocated": 0.1, "unallocated": 0.2, "agents": 1},
-	    {"pool": "ate-workers/spot", "estimated": true, "originCost": 0.2, "allocated": 0.1, "unallocated": 0.1, "agents": 1, "problems": ["leases booked more than the pool's capacity"]}
+	  "kind": "allocation-keys",
+	  "chargePeriodStart": "2026-10-16T12:00:00Z",
+	  "chargePeriodEnd": "2026-10-16T14:00:00Z",
+	  "allocationKeys": [
+	    {"ChargePeriodStart": "2026-10-16T12:00:00Z", "ChargePeriodEnd": "2026-10-16T14:00:00Z",
+	     "ServiceProviderName": "Google Cloud", "ServiceName": "Kubernetes Engine", "ServiceCategory": "Compute",
+	     "ResourceId": "gke-worker-pool/ate-workers/default", "ResourceName": "ate-workers/default", "ResourceType": "WorkerPool",
+	     "AllocatedMethodId": "booked-share",
+	     "AllocatedMethodDetails": {"Elements": [{"UsageQuantity": 0.5, "UsageUnit": "vCPU-Hours"}, {"UsageQuantity": 1, "UsageUnit": "GiB-Hours"}, {"UsageQuantity": 0.5, "UsageUnit": "Slot-Hours"}]},
+	     "AllocatedResourceId": "u1", "AllocatedResourceName": "team-a/agent-1",
+	     "AllocatedTags": {"agent-cost/tenant": "enterprise-a", "agent-cost/class": "agent", "tenant": "team-a"}},
+	    {"ChargePeriodStart": "2026-10-16T12:00:00Z", "ChargePeriodEnd": "2026-10-16T14:00:00Z",
+	     "ServiceProviderName": "openai", "ServiceName": "openai", "ResourceId": "gen-ai/openai", "ResourceType": "ModelAPI",
+	     "AllocatedMethodId": "token-usage",
+	     "AllocatedMethodDetails": {"Elements": [{"UsageQuantity": 1050, "UsageUnit": "Tokens"}, {"UsageQuantity": 0.00375, "UsageUnit": "Priced-Tokens", "x_Currency": "USD"}]},
+	     "AllocatedResourceId": "u1", "AllocatedResourceName": "team-a/agent-1",
+	     "AllocatedTags": {"is_agent": "false"}}
 	  ]
 	}`})
 	out, err := captureStdout(t, func() error { return runCost(srv.URL, "", "default", false, []string{"focus"}) })
@@ -284,32 +285,51 @@ func TestCostFocus_LabelsAnEstimatedOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"Cost Basis:      ESTIMATE — NOT RECONCILED",
-		"effective=$0.500000, billed=$0.000000 USD",
-		"expected_idle=$0.290000",
-		"price_gap=$0.010000 (bill vs. capacity at rate card prices; does not depend on the leases)",
-		"coverage=2.0000 lease-h / 2.5000 activation-h (ratio 0.8000)",
-		"Status:          NOT CHECKED AGAINST A BILL",
-		"EFFECTIVE ($)",
-		"Auxiliary Charges (tokens, storage):",
-		"token-usage",
-		"Estimated Leases: 1",
-		"ate-workers/spot origin=$0.200000 allocated=$0.100000 unallocated=$0.100000 agents=1 problems: leases booked more than the pool's capacity",
+		"FOCUS 1.3 Allocation Keys",
+		"Charge Period:   2026-10-16T12:00:00Z to 2026-10-16T14:00:00Z",
+		"usage keys, no cost",
+		"gke-worker-pool/ate-workers/default",
+		"0.5000 vCPU-Hours, 1.0000 GiB-Hours, 0.5000 Slot-Hours",
+		"1050.0000 Tokens, 0.0037 Priced-Tokens (USD)",
+		// The agent-cost/ tag wins over the unprefixed one.
+		"enterprise-a",
+		"shared",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("focus output lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "status=OK") || strings.Contains(out, "Status:          OK") {
-		t.Errorf("an estimated origin shows as checked:\n%s", out)
+	for _, gone := range []string{"EFFECTIVE", "BILLED", "OriginChargeId", "_unused_capacity"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("allocation keys show %q:\n%s", gone, out)
+		}
 	}
 }
 
-func TestCostFocus_OlderServerGapStillShows(t *testing.T) {
-	r := finops.FocusReconciliation{Gap: new(float64)}
-	*r.Gap = 0.02
-	if g := r.PriceGapValue(); g == nil || *g != 0.02 {
-		t.Errorf("PriceGapValue with only gap = %v", g)
+func TestCostFocus_NoKeys(t *testing.T) {
+	srv := rawServer(t, map[string]string{"/v1/costs/focus": `{"kind": "allocation-keys", "allocationKeys": []}`})
+	out, err := captureStdout(t, func() error { return runCost(srv.URL, "", "default", false, []string{"focus"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "No allocation keys.") {
+		t.Errorf("empty focus output:\n%s", out)
+	}
+}
+
+func TestAllocationKeyHelpers(t *testing.T) {
+	k := finops.AllocationKey{
+		AllocatedMethodDetails: finops.FocusMethodDetails{Elements: []finops.FocusElement{{UsageQuantity: 2, UsageUnit: finops.UnitSlotHours}}},
+		AllocatedTags:          map[string]string{"tenant": "plain", "agent-cost/class": "agent"},
+	}
+	if q, ok := k.Quantity(finops.UnitSlotHours); !ok || q != 2 {
+		t.Errorf("Quantity(Slot-Hours) = %v, %t", q, ok)
+	}
+	if _, ok := k.Quantity(finops.UnitTokens); ok {
+		t.Error("Quantity(Tokens) found on a compute key")
+	}
+	if k.Tag("tenant") != "plain" || k.Tag("class") != "agent" || k.Tag("missing") != "" {
+		t.Errorf("Tag: tenant=%q class=%q", k.Tag("tenant"), k.Tag("class"))
 	}
 }
 

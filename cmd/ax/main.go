@@ -262,7 +262,7 @@ Available Commands:
   cost [tasks|actors]     Show Agent FinOps cost summary across tasks and actors
   cost task <name>        Show 3-number hosting cost, LLM spend, budget, outcome, sub-agent tree, and sessions
   cost curve              Show < $1.00 / agent-month hosting cost sensitivity curve (On-Demand, CUD, Spot)
-  cost focus              Show FOCUS 1.3 split cost allocation rows and the reconciliation status (estimates are labeled)
+  cost focus              Show FOCUS 1.3 allocation keys: usage per agent and origin resource, no cost
   watch task <name>       Stream live status and condition updates for a task
   ssh <task-name> [-- cmd] Run a command or shell inside the running task container
                           (Ctrl-C is forwarded; press it twice quickly, or Ctrl-\, to exit locally)

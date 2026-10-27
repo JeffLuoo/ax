@@ -1,13 +1,14 @@
 {
   "targetUsd": 1,
   "storagePerAgentUsd": 0.06,
+  "priceList": "v1",
   "tiers": [
     {
       "tier": "on-demand",
-      "perActiveHour": 0.040085,
+      "perActiveHour": 0.04,
       "fixed": 0.06,
-      "breakEvenHours": 23.450168392166642,
-      "alwaysOn": 29.32205,
+      "breakEvenHours": 23.499999999999996,
+      "alwaysOn": 29.259999999999998,
       "points": [
         {
           "activeHours": 0,
@@ -18,286 +19,86 @@
         },
         {
           "activeHours": 1,
-          "variable": 0.040085,
+          "variable": 0.04,
           "storage": 0.06,
-          "activeCost": 0.10008500000000001,
+          "activeCost": 0.1,
           "underTarget": true
         },
         {
           "activeHours": 2,
-          "variable": 0.08017,
+          "variable": 0.08,
           "storage": 0.06,
-          "activeCost": 0.14017000000000002,
+          "activeCost": 0.14,
           "underTarget": true
         },
         {
           "activeHours": 5,
-          "variable": 0.20042500000000002,
+          "variable": 0.2,
           "storage": 0.06,
-          "activeCost": 0.260425,
+          "activeCost": 0.26,
           "underTarget": true
         },
         {
           "activeHours": 10,
-          "variable": 0.40085000000000004,
+          "variable": 0.4,
           "storage": 0.06,
-          "activeCost": 0.46085000000000004,
+          "activeCost": 0.46,
           "underTarget": true
         },
         {
           "activeHours": 15,
-          "variable": 0.601275,
+          "variable": 0.6,
           "storage": 0.06,
-          "activeCost": 0.6612750000000001,
+          "activeCost": 0.6599999999999999,
           "underTarget": true
         },
         {
           "activeHours": 20,
-          "variable": 0.8017000000000001,
+          "variable": 0.8,
           "storage": 0.06,
-          "activeCost": 0.8617000000000001,
+          "activeCost": 0.8600000000000001,
           "underTarget": true
         },
         {
           "activeHours": 30,
-          "variable": 1.20255,
+          "variable": 1.2,
           "storage": 0.06,
-          "activeCost": 1.26255,
+          "activeCost": 1.26,
           "underTarget": false
         },
         {
           "activeHours": 50,
-          "variable": 2.0042500000000003,
+          "variable": 2,
           "storage": 0.06,
-          "activeCost": 2.0642500000000004,
+          "activeCost": 2.06,
           "underTarget": false
         },
         {
           "activeHours": 100,
-          "variable": 4.008500000000001,
+          "variable": 4,
           "storage": 0.06,
-          "activeCost": 4.0685,
+          "activeCost": 4.06,
           "underTarget": false
         },
         {
           "activeHours": 200,
-          "variable": 8.017000000000001,
+          "variable": 8,
           "storage": 0.06,
-          "activeCost": 8.077000000000002,
+          "activeCost": 8.06,
           "underTarget": false
         },
         {
           "activeHours": 365,
-          "variable": 14.631025000000001,
+          "variable": 14.6,
           "storage": 0.06,
-          "activeCost": 14.691025000000002,
+          "activeCost": 14.66,
           "underTarget": false
         },
         {
           "activeHours": 730,
-          "variable": 29.262050000000002,
+          "variable": 29.2,
           "storage": 0.06,
-          "activeCost": 29.32205,
-          "underTarget": false
-        }
-      ]
-    },
-    {
-      "tier": "cud-1y",
-      "perActiveHour": 0.025252999999999998,
-      "fixed": 0.06,
-      "breakEvenHours": 37.22330020195621,
-      "alwaysOn": 18.49469,
-      "points": [
-        {
-          "activeHours": 0,
-          "variable": 0,
-          "storage": 0.06,
-          "activeCost": 0.06,
-          "underTarget": true
-        },
-        {
-          "activeHours": 1,
-          "variable": 0.025252999999999998,
-          "storage": 0.06,
-          "activeCost": 0.085253,
-          "underTarget": true
-        },
-        {
-          "activeHours": 2,
-          "variable": 0.050505999999999995,
-          "storage": 0.06,
-          "activeCost": 0.110506,
-          "underTarget": true
-        },
-        {
-          "activeHours": 5,
-          "variable": 0.126265,
-          "storage": 0.06,
-          "activeCost": 0.186265,
-          "underTarget": true
-        },
-        {
-          "activeHours": 10,
-          "variable": 0.25253,
-          "storage": 0.06,
-          "activeCost": 0.31253,
-          "underTarget": true
-        },
-        {
-          "activeHours": 15,
-          "variable": 0.378795,
-          "storage": 0.06,
-          "activeCost": 0.438795,
-          "underTarget": true
-        },
-        {
-          "activeHours": 20,
-          "variable": 0.50506,
-          "storage": 0.06,
-          "activeCost": 0.5650599999999999,
-          "underTarget": true
-        },
-        {
-          "activeHours": 30,
-          "variable": 0.75759,
-          "storage": 0.06,
-          "activeCost": 0.81759,
-          "underTarget": true
-        },
-        {
-          "activeHours": 50,
-          "variable": 1.2626499999999998,
-          "storage": 0.06,
-          "activeCost": 1.3226499999999999,
-          "underTarget": false
-        },
-        {
-          "activeHours": 100,
-          "variable": 2.5252999999999997,
-          "storage": 0.06,
-          "activeCost": 2.5852999999999997,
-          "underTarget": false
-        },
-        {
-          "activeHours": 200,
-          "variable": 5.050599999999999,
-          "storage": 0.06,
-          "activeCost": 5.110599999999999,
-          "underTarget": false
-        },
-        {
-          "activeHours": 365,
-          "variable": 9.217345,
-          "storage": 0.06,
-          "activeCost": 9.277345,
-          "underTarget": false
-        },
-        {
-          "activeHours": 730,
-          "variable": 18.43469,
-          "storage": 0.06,
-          "activeCost": 18.49469,
-          "underTarget": false
-        }
-      ]
-    },
-    {
-      "tier": "spot",
-      "perActiveHour": 0.012025000000000001,
-      "fixed": 0.06,
-      "breakEvenHours": 78.17047817047816,
-      "alwaysOn": 8.83825,
-      "points": [
-        {
-          "activeHours": 0,
-          "variable": 0,
-          "storage": 0.06,
-          "activeCost": 0.06,
-          "underTarget": true
-        },
-        {
-          "activeHours": 1,
-          "variable": 0.012025000000000001,
-          "storage": 0.06,
-          "activeCost": 0.072025,
-          "underTarget": true
-        },
-        {
-          "activeHours": 2,
-          "variable": 0.024050000000000002,
-          "storage": 0.06,
-          "activeCost": 0.08405,
-          "underTarget": true
-        },
-        {
-          "activeHours": 5,
-          "variable": 0.060125000000000005,
-          "storage": 0.06,
-          "activeCost": 0.12012500000000001,
-          "underTarget": true
-        },
-        {
-          "activeHours": 10,
-          "variable": 0.12025000000000001,
-          "storage": 0.06,
-          "activeCost": 0.18025000000000002,
-          "underTarget": true
-        },
-        {
-          "activeHours": 15,
-          "variable": 0.180375,
-          "storage": 0.06,
-          "activeCost": 0.240375,
-          "underTarget": true
-        },
-        {
-          "activeHours": 20,
-          "variable": 0.24050000000000002,
-          "storage": 0.06,
-          "activeCost": 0.3005,
-          "underTarget": true
-        },
-        {
-          "activeHours": 30,
-          "variable": 0.36075,
-          "storage": 0.06,
-          "activeCost": 0.42075,
-          "underTarget": true
-        },
-        {
-          "activeHours": 50,
-          "variable": 0.6012500000000001,
-          "storage": 0.06,
-          "activeCost": 0.6612500000000001,
-          "underTarget": true
-        },
-        {
-          "activeHours": 100,
-          "variable": 1.2025000000000001,
-          "storage": 0.06,
-          "activeCost": 1.2625000000000002,
-          "underTarget": false
-        },
-        {
-          "activeHours": 200,
-          "variable": 2.4050000000000002,
-          "storage": 0.06,
-          "activeCost": 2.4650000000000003,
-          "underTarget": false
-        },
-        {
-          "activeHours": 365,
-          "variable": 4.389125,
-          "storage": 0.06,
-          "activeCost": 4.4491249999999996,
-          "underTarget": false
-        },
-        {
-          "activeHours": 730,
-          "variable": 8.77825,
-          "storage": 0.06,
-          "activeCost": 8.83825,
+          "activeCost": 29.259999999999998,
           "underTarget": false
         }
       ]

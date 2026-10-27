@@ -204,49 +204,25 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/v1/costs/focus", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("format") == "csv" {
 			w.Header().Set("Content-Type", "text/csv")
-			_, _ = w.Write([]byte("OriginChargeId,AllocatedResourceId,BilledCost\nchg-1,f45d4ab9,0.000103\nchg-1,_unused_capacity,0.436910\n"))
+			_, _ = w.Write([]byte("ResourceId,AllocatedMethodId,AllocatedResourceId\ngke-worker-pool/otel-bench/pool-1,booked-share,f45d4ab9\n"))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(finops.FocusReport{
-			OriginCharge: finops.FocusCharge{
-				OriginChargeID:  "chg-otel-bench-pool-1",
-				BillingCurrency: "USD",
-				ServiceName:     "Compute Engine",
-				ResourceName:    "otel-bench-pool-1",
-				BilledCost:      0.437595,
-			},
-			Charges: []finops.FocusCharge{
-				{
-					OriginChargeID:        "chg-otel-bench-pool-1",
-					BillingCurrency:       "USD",
-					ServiceName:           "Compute Engine",
-					ConsumedQuantity:      12,
-					ConsumedUnit:          "Seconds",
-					BilledCost:            0.000103,
-					AllocatedMethodID:     "booked-share",
-					AllocatedResourceID:   "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
-					AllocatedResourceName: "otel-bench/coding-parent-1",
-					AllocatedTags:         map[string]string{"ate.finops.tenant": "otel-bench", "ate.template.class": "agent"},
-				},
-				{
-					OriginChargeID:        "chg-otel-bench-pool-1",
-					BillingCurrency:       "USD",
-					ServiceName:           "Compute Engine",
-					ConsumedQuantity:      3560,
-					ConsumedUnit:          "Seconds",
-					BilledCost:            0.436910,
-					AllocatedMethodID:     "booked-share",
-					AllocatedResourceID:   "_unused_capacity",
-					AllocatedResourceName: "_unused_capacity",
-				},
-			},
-			Reconciliation: &finops.FocusReconciliation{
-				OriginCost:  0.437595,
-				Allocated:   0.000685,
-				Unallocated: 0.436910,
-				Agents:      2,
-			},
+			Kind:              finops.FocusReportKind,
+			ChargePeriodStart: "2026-10-16T12:00:00Z",
+			ChargePeriodEnd:   "2026-10-16T14:00:00Z",
+			AllocationKeys: []finops.AllocationKey{{
+				ServiceName:       "Kubernetes Engine",
+				ResourceID:        "gke-worker-pool/otel-bench/pool-1",
+				AllocatedMethodID: "booked-share",
+				AllocatedMethodDetails: finops.FocusMethodDetails{Elements: []finops.FocusElement{
+					{UsageQuantity: 0.0033, UsageUnit: finops.UnitSlotHours},
+				}},
+				AllocatedResourceID:   "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
+				AllocatedResourceName: "otel-bench/coding-parent-1",
+				AllocatedTags:         map[string]string{"agent-cost/tenant": "otel-bench", "agent-cost/class": "agent"},
+			}},
 		})
 	})
 	srv := httptest.NewServer(mux)
@@ -378,7 +354,7 @@ func TestRunCostCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runCost focus failed: %v", err)
 		}
-		for _, want := range []string{"FOCUS 1.3 Split Cost Allocation Report", "chg-otel-bench-pool-1", "_unused_capacity", "$0.436910"} {
+		for _, want := range []string{"FOCUS 1.3 Allocation Keys", "gke-worker-pool/otel-bench/pool-1", "otel-bench/coding-parent-1", "0.0033 Slot-Hours", "otel-bench", "agent"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("expected focus output to contain %q, got:\n%s", want, out)
 			}
@@ -390,7 +366,7 @@ func TestRunCostCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runCost focus csv failed: %v", err)
 		}
-		if !strings.Contains(csvOut, "_unused_capacity,0.436910") {
+		if !strings.Contains(csvOut, "gke-worker-pool/otel-bench/pool-1,booked-share,f45d4ab9") {
 			t.Fatalf("unexpected focus CSV output:\n%s", csvOut)
 		}
 	})

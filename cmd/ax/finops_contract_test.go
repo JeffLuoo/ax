@@ -29,12 +29,11 @@ import (
 )
 
 // The files testdata/finops-*.json and finops-focus.csv are the responses of
-// a real finops server (github.com/JeffLuoo/finops, main at 990203b) after it
-// took two ax.task.state_changed events with this repo's internal/events
-// attributes (including ax.task.outcome_source) and nine Substrate lifecycle
-// events for the actors team-a/root and team-a/child. Regenerate them whenever
-// the finops HTTP API changes, so that this test checks the CLI against the
-// server that ships.
+// the Cost Service HTTP handlers (github.com/JeffLuoo/finops, main at b5c4eae)
+// for the actors team-a/root (task completed, one lease still open) and
+// team-a/child (task failed over its budget), plus team-b/solo outside the
+// atespace. Regenerate them whenever the Cost Service HTTP API changes, so
+// that this test checks the CLI against the server that ships.
 
 func readGolden(t *testing.T, name string) []byte {
 	t.Helper()
@@ -69,8 +68,15 @@ func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
 	if report.Atespace != "team-a" || report.CostBasis != finops.CostBasisEstimated {
 		t.Errorf("atespace %q, costBasis %q", report.Atespace, report.CostBasis)
 	}
-	if len(report.Curve) == 0 || len(report.Focus) == 0 || report.FocusReconciliation == nil || report.OutcomeCosts == nil {
-		t.Errorf("curve %d rows, focus %d rows, reconciliation %v, outcomeCosts %v", len(report.Curve), len(report.Focus), report.FocusReconciliation, report.OutcomeCosts)
+	if len(report.Curve) == 0 || report.OutcomeCosts == nil {
+		t.Errorf("curve %d rows, outcomeCosts %v", len(report.Curve), report.OutcomeCosts)
+	}
+	// The open lease's accrued cost is reported apart and is already in the
+	// compute total.
+	if !report.EstimatedFlag || !report.Estimated() || report.InFlightComputeCost.USD() <= 0 ||
+		report.Compute.InFlightComputeCost.USD() != report.InFlightComputeCost.USD() ||
+		report.Compute.Cost.USD() < report.InFlightComputeCost.USD() {
+		t.Errorf("estimated %t, inFlightComputeCost %v, compute %+v", report.EstimatedFlag, report.InFlightComputeCost, report.Compute)
 	}
 	byName := map[string]finops.ActorCost{}
 	for _, a := range report.Actors {
@@ -87,8 +93,28 @@ func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
 	if len(curve.Tiers) == 0 || len(curve.Tiers[0].Points) == 0 {
 		t.Errorf("curve = %+v", curve)
 	}
-	if focus.Reconciliation == nil || !focus.Estimated() || len(focus.Charges) == 0 {
-		t.Errorf("focus reconciliation %+v, estimated %t, %d charges", focus.Reconciliation, focus.Estimated(), len(focus.Charges))
+	if focus.Kind != finops.FocusReportKind || focus.ChargePeriodStart == "" || len(focus.AllocationKeys) == 0 {
+		t.Fatalf("focus kind %q, period %q, %d keys", focus.Kind, focus.ChargePeriodStart, len(focus.AllocationKeys))
+	}
+	methods := map[string]bool{}
+	for _, k := range focus.AllocationKeys {
+		methods[k.AllocatedMethodID] = true
+		if k.ResourceID == "" || k.AllocatedResourceID == "" || len(k.AllocatedMethodDetails.Elements) == 0 {
+			t.Errorf("allocation key without origin, agent, or usage: %+v", k)
+		}
+		for name := range k.AllocatedTags {
+			if strings.HasPrefix(name, "finops.") || strings.HasPrefix(name, "ate.finops") {
+				t.Errorf("allocation key has legacy tag %q", name)
+			}
+		}
+		if k.AllocatedMethodID == "booked-share" {
+			if q, ok := k.Quantity(finops.UnitSlotHours); !ok || q <= 0 {
+				t.Errorf("compute key without Slot-Hours: %+v", k)
+			}
+		}
+	}
+	if !methods["booked-share"] || !methods["token-usage"] {
+		t.Errorf("allocation key methods = %v, want booked-share and token-usage", methods)
 	}
 }
 
@@ -128,7 +154,7 @@ func TestFinOpsContract_CLIRendersTheGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"child", "root", "OUTCOME", "Failed", "Completed", "OVER", "Summary (atespace team-a, 2 rows)", "Cost basis: ESTIMATE — NOT RECONCILED", "By task outcome (self-reported): "} {
+	for _, want := range []string{"child", "root", "OUTCOME", "Failed", "Completed", "OVER", "Summary (atespace team-a, 2 rows)", "In-flight compute: $0.013333 from 1 open leases", "Cost basis: ESTIMATE — NOT RECONCILED", "By task outcome (self-reported): "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list output lacks %q:\n%s", want, out)
 		}
@@ -149,6 +175,9 @@ func TestFinOpsContract_CLIRendersTheGolden(t *testing.T) {
 	}
 	if !strings.Contains(out, "child") || !strings.Contains(out, "Sub-Agents:") {
 		t.Errorf("root detail does not list its sub-agent:\n%s", out)
+	}
+	if !strings.Contains(out, "of which in flight") || !strings.Contains(out, "open leases=1") {
+		t.Errorf("root detail does not show its open lease's accrued cost:\n%s", out)
 	}
 
 	for _, args := range [][]string{{"curve"}, {"focus"}, {"focus", "-o", "csv"}, {"-o", "yaml"}} {

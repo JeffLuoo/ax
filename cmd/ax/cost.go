@@ -45,7 +45,8 @@ const costUsage = `Usage:
 Query Agent FinOps cost attribution, active hosting cost breakdown
 (booked-share vs. measured-usage), per-session spend, task budgets and
 outcomes, the < $1/agent-month hosting sensitivity curve, and FOCUS 1.3
-split cost allocation rows.
+allocation keys (usage per agent and origin resource; the holder of the bill
+writes the split cost rows).
 
 -a limits the query to one atespace, on the server; without -a, the default
 atespace is shown, or all atespaces when it is empty. A task or actor is a
@@ -656,6 +657,10 @@ func renderCostList(out io.Writer, report *finops.CostReport, scope string, task
 			scopeLabel, len(rows), t.Calls, t.InputTokens, t.OutputTokens,
 			formatUSD(t.Cost.USD()), formatUSD(report.Compute.Cost.USD()),
 			formatUSD(report.TotalCost.USD()))
+		if inFlight := report.InFlightComputeCost.USD(); inFlight > 0 {
+			fmt.Fprintf(out, "In-flight compute: %s from %d open leases, accrued up to the report and included in compute\n",
+				formatUSD(inFlight), report.Compute.OpenLeases)
+		}
 	} else {
 		fmt.Fprintf(out, "\nSummary (%s, %d rows): the server did not filter by atespace, so it sent no totals for this atespace\n", scopeLabel, len(rows))
 	}
@@ -780,7 +785,7 @@ func renderActorDetail(out io.Writer, m *finops.ActorMatch, task *v1alpha1.Task,
 	}
 	fmt.Fprintf(out, "Class:              %s (is_agent=%t)\n", actorClass(*a), a.IsAgent)
 	if a.Tenant != "" {
-		fmt.Fprintf(out, "Tenant:             %s (ate.finops.tenant)\n", a.Tenant)
+		fmt.Fprintf(out, "Tenant:             %s (agent_cost.tenant)\n", a.Tenant)
 	}
 	fmt.Fprintf(out, "Sub-Agents:         %d\n", a.SubAgents)
 	printTaskBudget(out, a, viewTask(a, task))
@@ -867,6 +872,10 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 		a.Compute.Leases, a.Compute.LeaseSeconds,
 		a.Compute.VCPUSeconds/3600.0, a.Compute.GiBSeconds/3600.0,
 		a.Compute.MeasuredCPUSeconds)
+	if inFlight := a.Compute.InFlightComputeCost.USD(); inFlight > 0 {
+		fmt.Fprintf(hw, "       of which in flight\t%s\t-\topen leases=%d, accrued up to the report\n",
+			formatUSD(inFlight), a.Compute.OpenLeases)
+	}
 	fmt.Fprintf(hw, "     - Snapshot Storage\t%s\t%s\tGCS / snapshot GiB-month share\n",
 		formatUSD(storageUSD), formatUSD(storageUSD))
 	if egressUSD > 0 {
@@ -1003,115 +1012,55 @@ func renderCurveReport(out io.Writer, curve *finops.CurveReport) error {
 	return nil
 }
 
+// renderFocusReport prints the FOCUS 1.3 allocation keys. They hold usage
+// only: the holder of the bill divides each key by its resource's total and
+// writes the split cost rows, so there is no cost column here.
 func renderFocusReport(out io.Writer, focus *finops.FocusReport) error {
-	estimated := focus.Estimated()
-	oc := focus.OriginCharge
-	fmt.Fprintf(out, "FOCUS 1.3 Split Cost Allocation Report\n")
-	if estimated {
-		fmt.Fprintf(out, "  Cost Basis:      %s (the origin comes from rate card prices, not from the bill)\n", estimateLabel)
+	fmt.Fprintf(out, "FOCUS 1.3 Allocation Keys\n")
+	if focus.ChargePeriodStart != "" || focus.ChargePeriodEnd != "" {
+		fmt.Fprintf(out, "  Charge Period:   %s to %s\n", firstNonEmpty(focus.ChargePeriodStart, "-"), firstNonEmpty(focus.ChargePeriodEnd, "-"))
 	}
-	if oc.OriginChargeID != "" {
-		fmt.Fprintf(out, "  Origin Charge:   %s (%s, resource=%s, effective=%s, billed=%s %s)\n",
-			oc.OriginChargeID, oc.ServiceName, oc.ResourceName, formatUSD(oc.EffectiveCost), formatUSD(oc.BilledCost), oc.BillingCurrency)
+	fmt.Fprintf(out, "  Basis:           usage keys, no cost (the bill holder writes the split cost rows)\n\n")
+	if len(focus.AllocationKeys) == 0 {
+		fmt.Fprintln(out, "No allocation keys.")
+		return nil
 	}
-	if r := focus.Reconciliation; r != nil {
-		status := "OK"
-		switch {
-		case estimated && len(r.Problems) > 0:
-			status = "NOT CHECKED AGAINST A BILL; PROBLEMS: " + strings.Join(r.Problems, "; ")
-		case estimated:
-			status = "NOT CHECKED AGAINST A BILL"
-		case len(r.Problems) > 0:
-			status = "PROBLEMS: " + strings.Join(r.Problems, "; ")
-		}
-		fmt.Fprintf(out, "  Reconciliation:  origin=%s allocated=%s unallocated(_unused_capacity)=%s agents=%d unsized_leases=%d\n",
-			formatUSD(r.OriginCost), formatUSD(r.Allocated), formatUSD(r.Unallocated), r.Agents, r.UnsizedLeases)
-		var checks []string
-		if r.ExpectedIdle != nil {
-			checks = append(checks, "expected_idle="+formatUSD(*r.ExpectedIdle))
-		}
-		if g := r.PriceGapValue(); g != nil {
-			checks = append(checks, "price_gap="+formatUSD(*g)+" (bill vs. capacity at rate card prices; does not depend on the leases)")
-		}
-		if r.CoverageLeaseHours != nil && r.CoverageActivationHours != nil {
-			c := fmt.Sprintf("coverage=%.4f lease-h / %.4f activation-h", *r.CoverageLeaseHours, *r.CoverageActivationHours)
-			if r.CoverageRatio != nil {
-				c += fmt.Sprintf(" (ratio %.4f)", *r.CoverageRatio)
-			}
-			checks = append(checks, c)
-		}
-		if len(checks) > 0 {
-			fmt.Fprintf(out, "                   %s\n", strings.Join(checks, " "))
-		}
-		fmt.Fprintf(out, "  Status:          %s\n", status)
-		if r.EstimatedLeases > 0 {
-			fmt.Fprintf(out, "  Estimated Leases: %d (a start or end that no lifecycle record showed)\n", r.EstimatedLeases)
-		}
-		if len(focus.Reconciliations) > 1 {
-			fmt.Fprintln(out, "  Per Pool:")
-			for _, p := range focus.Reconciliations {
-				problems := ""
-				if len(p.Problems) > 0 {
-					problems = " problems: " + strings.Join(p.Problems, "; ")
-				}
-				fmt.Fprintf(out, "    %s origin=%s allocated=%s unallocated=%s agents=%d%s\n",
-					p.Pool, formatUSD(p.OriginCost), formatUSD(p.Allocated), formatUSD(p.Unallocated), p.Agents, problems)
-			}
-		}
-		fmt.Fprintln(out)
-	} else {
-		fmt.Fprintln(out)
-	}
-
 	w := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(w, "ALLOCATED-RESOURCE-ID\tALLOCATED-NAME\tMETHOD\tSERVICE\tQUANTITY\tUNIT\tEFFECTIVE ($)\tBILLED ($)\tTENANT\tCLASS\tESTIMATE")
-	writeRow := func(c finops.FocusCharge) {
-		est := "no"
-		if c.Estimated() || estimated {
-			est = "yes"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.4f\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			firstNonEmpty(c.AllocatedResourceID, "-"), firstNonEmpty(c.AllocatedResourceName, "-"),
-			c.AllocatedMethodID, c.ServiceName, c.ConsumedQuantity, c.ConsumedUnit,
-			formatUSD(c.EffectiveCost), formatUSD(c.BilledCost), focusTenant(c), focusClass(c), est)
+	fmt.Fprintln(w, "ALLOCATED-RESOURCE-ID\tALLOCATED-NAME\tMETHOD\tRESOURCE\tUSAGE\tTENANT\tCLASS")
+	for _, k := range focus.AllocationKeys {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			firstNonEmpty(k.AllocatedResourceID, "-"), firstNonEmpty(k.AllocatedResourceName, "-"),
+			k.AllocatedMethodID, firstNonEmpty(k.ResourceID, k.ServiceName, "-"),
+			focusUsage(k), focusTenant(k), focusClass(k))
 	}
-	for _, c := range focus.Charges {
-		writeRow(c)
-	}
-	if err := w.Flush(); err != nil {
-		return err
-	}
-	if len(focus.AuxiliaryCharges) > 0 {
-		fmt.Fprintln(out, "\nAuxiliary Charges (tokens, storage):")
-		w = tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-		fmt.Fprintln(w, "ALLOCATED-RESOURCE-ID\tALLOCATED-NAME\tMETHOD\tSERVICE\tQUANTITY\tUNIT\tEFFECTIVE ($)\tBILLED ($)\tTENANT\tCLASS\tESTIMATE")
-		for _, c := range focus.AuxiliaryCharges {
-			writeRow(c)
-		}
-		return w.Flush()
-	}
-	return nil
+	return w.Flush()
 }
 
-func focusTenant(c finops.FocusCharge) string {
-	return firstNonEmpty(
-		c.AllocatedTags["tenant"],
-		c.AllocatedTags["finops.agent-substrate.dev/tenant"],
-		c.AllocatedTags["ate.finops.tenant"],
-		"-",
-	)
+// focusUsage joins a key's elements as "<quantity> <unit>" pairs.
+func focusUsage(k finops.AllocationKey) string {
+	var parts []string
+	for _, e := range k.AllocatedMethodDetails.Elements {
+		unit := e.UsageUnit
+		if e.Currency != "" {
+			unit += " (" + e.Currency + ")"
+		}
+		parts = append(parts, fmt.Sprintf("%.4f %s", e.UsageQuantity, unit))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, ", ")
 }
 
-func focusClass(c finops.FocusCharge) string {
-	class := firstNonEmpty(
-		c.AllocatedTags["finops.agent-substrate.dev/class"],
-		c.AllocatedTags["ate.template.class"],
-		c.AllocatedTags["class"],
-	)
-	if class != "" {
+func focusTenant(k finops.AllocationKey) string {
+	return firstNonEmpty(k.Tag("tenant"), "-")
+}
+
+func focusClass(k finops.AllocationKey) string {
+	if class := k.Tag("class"); class != "" {
 		return class
 	}
-	switch firstNonEmpty(c.AllocatedTags["is_agent"], c.AllocatedTags["finops.agent-substrate.dev/is_agent"]) {
+	switch k.Tag("is_agent") {
 	case "true":
 		return "agent"
 	case "false":

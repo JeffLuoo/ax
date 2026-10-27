@@ -1,120 +1,266 @@
 {
   "costBasis": "estimated",
-  "since": "2026-10-19T13:57:58.246713197Z",
-  "generatedAt": "2026-10-19T13:57:59.317765611Z",
+  "estimated": true,
+  "since": "2026-10-27T18:17:47.197745175Z",
+  "generatedAt": "2026-10-16T14:00:00Z",
   "totals": {
-    "calls": 0,
-    "inputTokens": 0,
-    "outputTokens": 0,
+    "calls": 2,
+    "inputTokens": 2100,
+    "outputTokens": 450,
     "cacheReadInputTokens": 0,
     "cacheWriteInputTokens": 0,
     "reasoningOutputTokens": 0,
-    "cost": {},
+    "cost": {
+      "USD": 0.01185
+    },
     "unpricedCalls": 0,
     "unknownCostCalls": 0,
-    "usageStatus": {},
-    "lastCall": "0001-01-01T00:00:00Z"
+    "lowerBoundCalls": 0,
+    "usageStatus": {
+      "ok": 2
+    },
+    "lastCall": "2026-10-16T12:01:00Z"
   },
   "compute": {
-    "leases": 2,
+    "leases": 4,
     "openLeases": 1,
-    "leaseSeconds": 8402.317765611,
-    "vcpuSeconds": 8402.317765611,
-    "gibSeconds": 16804.635531222,
+    "leaseSeconds": 8700,
+    "vcpuSeconds": 8700,
+    "gibSeconds": 17400,
     "cost": {
-      "USD": 0.093557474343
+      "USD": 0.096666666666
+    },
+    "inFlightComputeCost": {
+      "USD": 0.013333333333
     },
     "measuredCost": {
-      "USD": 0.055342808555
+      "USD": 0.096666666666
     },
-    "measuredFallbackLeases": 1,
+    "measuredFallbackLeases": 4,
     "unpricedLeases": 0,
-    "measuredCpuSeconds": 120,
-    "lastLease": "2026-10-19T13:57:59.317765611Z"
+    "measuredCpuSeconds": 0,
+    "lastLease": "2026-10-16T14:00:00Z"
+  },
+  "inFlightComputeCost": {
+    "USD": 0.013333333333
   },
   "totalCost": {
-    "USD": 0.093557474343
+    "USD": 0.108516666666
   },
   "actors": [
     {
       "atespace": "team-a",
       "name": "child",
-      "uid": "uid-child-0000001",
+      "uid": "uid-child",
       "tenant": "team-a",
-      "parentAgentId": "team-a/root",
-      "template": "team-a/support-agent",
+      "parentAgentId": "uid-root",
+      "template": "team-a/child-tpl",
       "class": "agent",
       "isAgent": true,
-      "calls": 0,
-      "inputTokens": 0,
-      "outputTokens": 0,
+      "calls": 1,
+      "inputTokens": 900,
+      "outputTokens": 150,
       "cacheReadInputTokens": 0,
       "cacheWriteInputTokens": 0,
       "reasoningOutputTokens": 0,
-      "cost": {},
+      "cost": {
+        "USD": 0.00375
+      },
       "unpricedCalls": 0,
       "unknownCostCalls": 0,
-      "usageStatus": {},
-      "lastCall": "0001-01-01T00:00:00Z",
+      "lowerBoundCalls": 0,
+      "usageStatus": {
+        "ok": 1
+      },
+      "lastCall": "2026-10-16T12:01:00Z",
       "compute": {
         "leases": 1,
-        "openLeases": 1,
-        "leaseSeconds": 4801.317765611,
-        "vcpuSeconds": 4801.317765611,
-        "gibSeconds": 9602.635531222,
+        "openLeases": 0,
+        "leaseSeconds": 4800,
+        "vcpuSeconds": 4800,
+        "gibSeconds": 9600,
         "cost": {
-          "USD": 0.053461339621
+          "USD": 0.053333333333
         },
         "measuredCost": {
-          "USD": 0.053461339621
+          "USD": 0.053333333333
         },
         "measuredFallbackLeases": 1,
         "unpricedLeases": 0,
         "measuredCpuSeconds": 0,
-        "lastLease": "2026-10-19T13:57:59.317765611Z"
+        "lastLease": "2026-10-16T13:30:00Z"
       },
       "totalCost": {
-        "USD": 0.053461339621
+        "USD": 0.057083333333
       },
       "measuredComputeCost": {
-        "USD": 0.053461339621
+        "USD": 0.053333333333
       },
       "storageCost": {
-        "USD": 0.000109619127
+        "USD": 0.06
       },
       "hostingCost": {
-        "USD": 0.053570958748
+        "USD": 0.113333333333
       },
       "measuredHostingCost": {
-        "USD": 0.053570958748
+        "USD": 0.113333333333
+      },
+      "treeLlmCost": {
+        "USD": 0.00375
       },
       "treeComputeCost": {
-        "USD": 0.053461339621
+        "USD": 0.053333333333
       },
       "treeTotalCost": {
-        "USD": 0.053461339621
+        "USD": 0.057083333333
       },
       "task": {
         "name": "child",
         "parent": "root",
+        "parentSource": "unverified",
         "budgetUsd": 0.01,
-        "spendUsd": 0.053461339621,
-        "treeSpendUsd": 0.053461339621,
+        "budgetSource": "unverified",
+        "spendUsd": 0.057083333333,
+        "treeSpendUsd": 0.057083333333,
         "overBudget": true,
         "treeOverBudget": true,
         "outcome": "Failed",
         "exitCode": 3,
         "outcomeSource": "sandbox"
       },
-      "models": []
+      "models": [
+        {
+          "provider": "openai",
+          "model": "gpt-4o",
+          "calls": 1,
+          "inputTokens": 900,
+          "outputTokens": 150,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "reasoningOutputTokens": 0,
+          "cost": {
+            "USD": 0.00375
+          },
+          "unpricedCalls": 0,
+          "unknownCostCalls": 0,
+          "lowerBoundCalls": 0,
+          "usageStatus": {
+            "ok": 1
+          },
+          "lastCall": "2026-10-16T12:01:00Z"
+        }
+      ]
     },
     {
       "atespace": "team-a",
       "name": "root",
-      "uid": "uid-root-00000001",
+      "uid": "uid-root",
       "tenant": "team-a",
       "subAgents": 1,
-      "template": "team-a/support-agent",
+      "template": "team-a/root-tpl",
+      "class": "agent",
+      "isAgent": true,
+      "calls": 1,
+      "inputTokens": 1200,
+      "outputTokens": 300,
+      "cacheReadInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "reasoningOutputTokens": 0,
+      "cost": {
+        "USD": 0.0081
+      },
+      "unpricedCalls": 0,
+      "unknownCostCalls": 0,
+      "lowerBoundCalls": 0,
+      "usageStatus": {
+        "ok": 1
+      },
+      "lastCall": "2026-10-16T12:01:00Z",
+      "compute": {
+        "leases": 2,
+        "openLeases": 1,
+        "leaseSeconds": 3000,
+        "vcpuSeconds": 3000,
+        "gibSeconds": 6000,
+        "cost": {
+          "USD": 0.033333333333
+        },
+        "inFlightComputeCost": {
+          "USD": 0.013333333333
+        },
+        "measuredCost": {
+          "USD": 0.033333333333
+        },
+        "measuredFallbackLeases": 2,
+        "unpricedLeases": 0,
+        "measuredCpuSeconds": 0,
+        "lastLease": "2026-10-16T14:00:00Z"
+      },
+      "totalCost": {
+        "USD": 0.041433333333
+      },
+      "measuredComputeCost": {
+        "USD": 0.033333333333
+      },
+      "storageCost": {
+        "USD": 0.06
+      },
+      "hostingCost": {
+        "USD": 0.093333333333
+      },
+      "measuredHostingCost": {
+        "USD": 0.093333333333
+      },
+      "treeLlmCost": {
+        "USD": 0.01185
+      },
+      "treeComputeCost": {
+        "USD": 0.086666666666
+      },
+      "treeTotalCost": {
+        "USD": 0.098516666666
+      },
+      "task": {
+        "name": "root",
+        "budgetUsd": 5,
+        "budgetSource": "unverified",
+        "spendUsd": 0.041433333333,
+        "treeSpendUsd": 0.098516666666,
+        "overBudget": false,
+        "treeOverBudget": false,
+        "outcome": "Completed",
+        "exitCode": 0,
+        "outcomeSource": "sandbox"
+      },
+      "models": [
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-5",
+          "calls": 1,
+          "inputTokens": 1200,
+          "outputTokens": 300,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 0,
+          "reasoningOutputTokens": 0,
+          "cost": {
+            "USD": 0.0081
+          },
+          "unpricedCalls": 0,
+          "unknownCostCalls": 0,
+          "lowerBoundCalls": 0,
+          "usageStatus": {
+            "ok": 1
+          },
+          "lastCall": "2026-10-16T12:01:00Z"
+        }
+      ]
+    },
+    {
+      "atespace": "team-b",
+      "name": "solo",
+      "uid": "uid-solo",
+      "tenant": "team-b",
+      "template": "team-b/solo-tpl",
       "class": "agent",
       "isAgent": true,
       "calls": 0,
@@ -126,138 +272,270 @@
       "cost": {},
       "unpricedCalls": 0,
       "unknownCostCalls": 0,
+      "lowerBoundCalls": 0,
       "usageStatus": {},
       "lastCall": "0001-01-01T00:00:00Z",
       "compute": {
         "leases": 1,
         "openLeases": 0,
-        "leaseSeconds": 3601,
-        "vcpuSeconds": 3601,
-        "gibSeconds": 7202,
+        "leaseSeconds": 900,
+        "vcpuSeconds": 900,
+        "gibSeconds": 1800,
         "cost": {
-          "USD": 0.040096134722
+          "USD": 0.01
         },
         "measuredCost": {
-          "USD": 0.001881468934
+          "USD": 0.01
         },
-        "measuredFallbackLeases": 0,
+        "measuredFallbackLeases": 1,
         "unpricedLeases": 0,
-        "measuredCpuSeconds": 120,
-        "lastLease": "2026-10-19T12:57:59Z"
+        "measuredCpuSeconds": 0,
+        "lastLease": "2026-10-16T12:15:00Z"
       },
       "totalCost": {
-        "USD": 0.040096134722
+        "USD": 0.01
       },
       "measuredComputeCost": {
-        "USD": 0.001881468934
+        "USD": 0.01
       },
       "storageCost": {
-        "USD": 8.2214612e-05
+        "USD": 0.06
       },
       "hostingCost": {
-        "USD": 0.040178349334
+        "USD": 0.07
       },
       "measuredHostingCost": {
-        "USD": 0.001963683546
+        "USD": 0.07
       },
       "treeComputeCost": {
-        "USD": 0.093557474343
+        "USD": 0.01
       },
       "treeTotalCost": {
-        "USD": 0.093557474343
-      },
-      "task": {
-        "name": "root",
-        "budgetUsd": 5,
-        "spendUsd": 0.040096134722,
-        "treeSpendUsd": 0.093557474343,
-        "overBudget": false,
-        "treeOverBudget": false,
-        "outcome": "Completed",
-        "exitCode": 0,
-        "outcomeSource": "sandbox"
+        "USD": 0.01
       },
       "models": []
     }
   ],
   "templates": [
     {
-      "template": "team-a/support-agent",
+      "template": "team-a/child-tpl",
       "class": "agent",
-      "actors": 2,
-      "llmCost": {},
+      "actors": 1,
+      "llmCost": {
+        "USD": 0.00375
+      },
       "compute": {
-        "leases": 2,
-        "openLeases": 1,
-        "leaseSeconds": 8402.317765611,
-        "vcpuSeconds": 8402.317765611,
-        "gibSeconds": 16804.635531222,
+        "leases": 1,
+        "openLeases": 0,
+        "leaseSeconds": 4800,
+        "vcpuSeconds": 4800,
+        "gibSeconds": 9600,
         "cost": {
-          "USD": 0.093557474343
+          "USD": 0.053333333333
         },
         "measuredCost": {
-          "USD": 0.055342808555
+          "USD": 0.053333333333
         },
         "measuredFallbackLeases": 1,
         "unpricedLeases": 0,
-        "measuredCpuSeconds": 120,
-        "lastLease": "2026-10-19T13:57:59.317765611Z"
+        "measuredCpuSeconds": 0,
+        "lastLease": "2026-10-16T13:30:00Z"
       },
       "totalCost": {
-        "USD": 0.093557474343
+        "USD": 0.057083333333
+      }
+    },
+    {
+      "template": "team-a/root-tpl",
+      "class": "agent",
+      "actors": 1,
+      "llmCost": {
+        "USD": 0.0081
+      },
+      "compute": {
+        "leases": 2,
+        "openLeases": 1,
+        "leaseSeconds": 3000,
+        "vcpuSeconds": 3000,
+        "gibSeconds": 6000,
+        "cost": {
+          "USD": 0.033333333333
+        },
+        "inFlightComputeCost": {
+          "USD": 0.013333333333
+        },
+        "measuredCost": {
+          "USD": 0.033333333333
+        },
+        "measuredFallbackLeases": 2,
+        "unpricedLeases": 0,
+        "measuredCpuSeconds": 0,
+        "lastLease": "2026-10-16T14:00:00Z"
+      },
+      "totalCost": {
+        "USD": 0.041433333333
+      }
+    },
+    {
+      "template": "team-b/solo-tpl",
+      "class": "agent",
+      "actors": 1,
+      "llmCost": {},
+      "compute": {
+        "leases": 1,
+        "openLeases": 0,
+        "leaseSeconds": 900,
+        "vcpuSeconds": 900,
+        "gibSeconds": 1800,
+        "cost": {
+          "USD": 0.01
+        },
+        "measuredCost": {
+          "USD": 0.01
+        },
+        "measuredFallbackLeases": 1,
+        "unpricedLeases": 0,
+        "measuredCpuSeconds": 0,
+        "lastLease": "2026-10-16T12:15:00Z"
+      },
+      "totalCost": {
+        "USD": 0.01
       }
     }
   ],
   "sessions": [
     {
-      "sessionId": "uid-child-0000001#epoch:uid-child-0000001/1792413478000000000",
+      "sessionId": "uid-child#epoch:uid-child/2026-10-16T12:10:00Z",
       "fromHeader": false,
       "atespace": "team-a",
       "actor": "team-a/child",
-      "actorUid": "uid-child-0000001",
+      "actorUid": "uid-child",
       "calls": 0,
       "inputTokens": 0,
       "outputTokens": 0,
-      "activeSeconds": 4801.317766,
+      "activeSeconds": 4800,
       "activeShare": 1,
+      "splitBasis": "lease-time",
       "llmCost": {},
       "computeCost": {
-        "USD": 0.053461339621
+        "USD": 0.053333333333
       },
       "totalCost": {
-        "USD": 0.053461339621
+        "USD": 0.053333333333
       },
-      "lastActivity": "2026-10-19T13:57:59.317765611Z"
+      "lastActivity": "2026-10-16T13:30:00Z"
     },
     {
-      "sessionId": "uid-root-00000001#epoch:1792411078000000000",
+      "sessionId": "uid-root#epoch:uid-root/2026-10-16T12:00:00Z",
       "fromHeader": false,
       "atespace": "team-a",
       "actor": "team-a/root",
-      "actorUid": "uid-root-00000001",
-      "epoch": "1792411078000000000",
+      "actorUid": "uid-root",
       "calls": 0,
       "inputTokens": 0,
       "outputTokens": 0,
-      "activeSeconds": 3601,
-      "activeShare": 1,
+      "activeSeconds": 1800,
+      "activeShare": 0.6,
+      "splitBasis": "lease-time",
       "llmCost": {},
       "computeCost": {
-        "USD": 0.040096134722
+        "USD": 0.02
       },
       "totalCost": {
-        "USD": 0.040096134722
+        "USD": 0.02
       },
-      "lastActivity": "2026-10-19T12:57:59Z"
+      "lastActivity": "2026-10-16T12:30:00Z"
+    },
+    {
+      "sessionId": "uid-root#epoch:uid-root/2026-10-16T13:40:00Z",
+      "fromHeader": false,
+      "atespace": "team-a",
+      "actor": "team-a/root",
+      "actorUid": "uid-root",
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "activeSeconds": 1200,
+      "activeShare": 0.4,
+      "splitBasis": "lease-time",
+      "llmCost": {},
+      "computeCost": {
+        "USD": 0.013333333333
+      },
+      "totalCost": {
+        "USD": 0.013333333333
+      },
+      "lastActivity": "2026-10-16T14:00:00Z"
+    },
+    {
+      "sessionId": "uid-solo#epoch:uid-solo/2026-10-16T12:00:00Z",
+      "fromHeader": false,
+      "atespace": "team-b",
+      "actor": "team-b/solo",
+      "actorUid": "uid-solo",
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "activeSeconds": 900,
+      "activeShare": 1,
+      "splitBasis": "lease-time",
+      "llmCost": {},
+      "computeCost": {
+        "USD": 0.01
+      },
+      "totalCost": {
+        "USD": 0.01
+      },
+      "lastActivity": "2026-10-16T12:15:00Z"
+    },
+    {
+      "sessionId": "uid-root#default",
+      "fromHeader": false,
+      "atespace": "team-a",
+      "actor": "team-a/root",
+      "actorUid": "uid-root",
+      "calls": 1,
+      "inputTokens": 1200,
+      "outputTokens": 300,
+      "activeSeconds": 0,
+      "splitBasis": "lease-time",
+      "llmCost": {
+        "USD": 0.0081
+      },
+      "computeCost": {},
+      "totalCost": {
+        "USD": 0.0081
+      },
+      "lastActivity": "2026-10-16T12:01:00Z"
+    },
+    {
+      "sessionId": "uid-child#default",
+      "fromHeader": false,
+      "atespace": "team-a",
+      "actor": "team-a/child",
+      "actorUid": "uid-child",
+      "calls": 1,
+      "inputTokens": 900,
+      "outputTokens": 150,
+      "activeSeconds": 0,
+      "splitBasis": "lease-time",
+      "llmCost": {
+        "USD": 0.00375
+      },
+      "computeCost": {},
+      "totalCost": {
+        "USD": 0.00375
+      },
+      "lastActivity": "2026-10-16T12:01:00Z"
     }
   ],
   "curve": [
     {
       "tier": "on-demand",
-      "perActiveHour": 0.040085,
+      "perActiveHour": 0.04,
       "fixed": 0.06,
-      "breakEvenHours": 23.450168392166642,
-      "alwaysOn": 29.32205,
+      "breakEvenHours": 23.499999999999996,
+      "alwaysOn": 29.259999999999998,
       "points": [
         {
           "activeHours": 0,
@@ -268,487 +546,104 @@
         },
         {
           "activeHours": 1,
-          "variable": 0.040085,
+          "variable": 0.04,
           "storage": 0.06,
-          "activeCost": 0.10008500000000001,
+          "activeCost": 0.1,
           "underTarget": true
         },
         {
           "activeHours": 2,
-          "variable": 0.08017,
+          "variable": 0.08,
           "storage": 0.06,
-          "activeCost": 0.14017000000000002,
+          "activeCost": 0.14,
           "underTarget": true
         },
         {
           "activeHours": 5,
-          "variable": 0.20042500000000002,
+          "variable": 0.2,
           "storage": 0.06,
-          "activeCost": 0.260425,
+          "activeCost": 0.26,
           "underTarget": true
         },
         {
           "activeHours": 10,
-          "variable": 0.40085000000000004,
+          "variable": 0.4,
           "storage": 0.06,
-          "activeCost": 0.46085000000000004,
+          "activeCost": 0.46,
           "underTarget": true
         },
         {
           "activeHours": 15,
-          "variable": 0.601275,
+          "variable": 0.6,
           "storage": 0.06,
-          "activeCost": 0.6612750000000001,
+          "activeCost": 0.6599999999999999,
           "underTarget": true
         },
         {
           "activeHours": 20,
-          "variable": 0.8017000000000001,
+          "variable": 0.8,
           "storage": 0.06,
-          "activeCost": 0.8617000000000001,
+          "activeCost": 0.8600000000000001,
           "underTarget": true
         },
         {
           "activeHours": 30,
-          "variable": 1.20255,
+          "variable": 1.2,
           "storage": 0.06,
-          "activeCost": 1.26255,
+          "activeCost": 1.26,
           "underTarget": false
         },
         {
           "activeHours": 50,
-          "variable": 2.0042500000000003,
+          "variable": 2,
           "storage": 0.06,
-          "activeCost": 2.0642500000000004,
+          "activeCost": 2.06,
           "underTarget": false
         },
         {
           "activeHours": 100,
-          "variable": 4.008500000000001,
+          "variable": 4,
           "storage": 0.06,
-          "activeCost": 4.0685,
+          "activeCost": 4.06,
           "underTarget": false
         },
         {
           "activeHours": 200,
-          "variable": 8.017000000000001,
+          "variable": 8,
           "storage": 0.06,
-          "activeCost": 8.077000000000002,
+          "activeCost": 8.06,
           "underTarget": false
         },
         {
           "activeHours": 365,
-          "variable": 14.631025000000001,
+          "variable": 14.6,
           "storage": 0.06,
-          "activeCost": 14.691025000000002,
+          "activeCost": 14.66,
           "underTarget": false
         },
         {
           "activeHours": 730,
-          "variable": 29.262050000000002,
+          "variable": 29.2,
           "storage": 0.06,
-          "activeCost": 29.32205,
-          "underTarget": false
-        }
-      ]
-    },
-    {
-      "tier": "cud-1y",
-      "perActiveHour": 0.025252999999999998,
-      "fixed": 0.06,
-      "breakEvenHours": 37.22330020195621,
-      "alwaysOn": 18.49469,
-      "points": [
-        {
-          "activeHours": 0,
-          "variable": 0,
-          "storage": 0.06,
-          "activeCost": 0.06,
-          "underTarget": true
-        },
-        {
-          "activeHours": 1,
-          "variable": 0.025252999999999998,
-          "storage": 0.06,
-          "activeCost": 0.085253,
-          "underTarget": true
-        },
-        {
-          "activeHours": 2,
-          "variable": 0.050505999999999995,
-          "storage": 0.06,
-          "activeCost": 0.110506,
-          "underTarget": true
-        },
-        {
-          "activeHours": 5,
-          "variable": 0.126265,
-          "storage": 0.06,
-          "activeCost": 0.186265,
-          "underTarget": true
-        },
-        {
-          "activeHours": 10,
-          "variable": 0.25253,
-          "storage": 0.06,
-          "activeCost": 0.31253,
-          "underTarget": true
-        },
-        {
-          "activeHours": 15,
-          "variable": 0.378795,
-          "storage": 0.06,
-          "activeCost": 0.438795,
-          "underTarget": true
-        },
-        {
-          "activeHours": 20,
-          "variable": 0.50506,
-          "storage": 0.06,
-          "activeCost": 0.5650599999999999,
-          "underTarget": true
-        },
-        {
-          "activeHours": 30,
-          "variable": 0.75759,
-          "storage": 0.06,
-          "activeCost": 0.81759,
-          "underTarget": true
-        },
-        {
-          "activeHours": 50,
-          "variable": 1.2626499999999998,
-          "storage": 0.06,
-          "activeCost": 1.3226499999999999,
-          "underTarget": false
-        },
-        {
-          "activeHours": 100,
-          "variable": 2.5252999999999997,
-          "storage": 0.06,
-          "activeCost": 2.5852999999999997,
-          "underTarget": false
-        },
-        {
-          "activeHours": 200,
-          "variable": 5.050599999999999,
-          "storage": 0.06,
-          "activeCost": 5.110599999999999,
-          "underTarget": false
-        },
-        {
-          "activeHours": 365,
-          "variable": 9.217345,
-          "storage": 0.06,
-          "activeCost": 9.277345,
-          "underTarget": false
-        },
-        {
-          "activeHours": 730,
-          "variable": 18.43469,
-          "storage": 0.06,
-          "activeCost": 18.49469,
-          "underTarget": false
-        }
-      ]
-    },
-    {
-      "tier": "spot",
-      "perActiveHour": 0.012025000000000001,
-      "fixed": 0.06,
-      "breakEvenHours": 78.17047817047816,
-      "alwaysOn": 8.83825,
-      "points": [
-        {
-          "activeHours": 0,
-          "variable": 0,
-          "storage": 0.06,
-          "activeCost": 0.06,
-          "underTarget": true
-        },
-        {
-          "activeHours": 1,
-          "variable": 0.012025000000000001,
-          "storage": 0.06,
-          "activeCost": 0.072025,
-          "underTarget": true
-        },
-        {
-          "activeHours": 2,
-          "variable": 0.024050000000000002,
-          "storage": 0.06,
-          "activeCost": 0.08405,
-          "underTarget": true
-        },
-        {
-          "activeHours": 5,
-          "variable": 0.060125000000000005,
-          "storage": 0.06,
-          "activeCost": 0.12012500000000001,
-          "underTarget": true
-        },
-        {
-          "activeHours": 10,
-          "variable": 0.12025000000000001,
-          "storage": 0.06,
-          "activeCost": 0.18025000000000002,
-          "underTarget": true
-        },
-        {
-          "activeHours": 15,
-          "variable": 0.180375,
-          "storage": 0.06,
-          "activeCost": 0.240375,
-          "underTarget": true
-        },
-        {
-          "activeHours": 20,
-          "variable": 0.24050000000000002,
-          "storage": 0.06,
-          "activeCost": 0.3005,
-          "underTarget": true
-        },
-        {
-          "activeHours": 30,
-          "variable": 0.36075,
-          "storage": 0.06,
-          "activeCost": 0.42075,
-          "underTarget": true
-        },
-        {
-          "activeHours": 50,
-          "variable": 0.6012500000000001,
-          "storage": 0.06,
-          "activeCost": 0.6612500000000001,
-          "underTarget": true
-        },
-        {
-          "activeHours": 100,
-          "variable": 1.2025000000000001,
-          "storage": 0.06,
-          "activeCost": 1.2625000000000002,
-          "underTarget": false
-        },
-        {
-          "activeHours": 200,
-          "variable": 2.4050000000000002,
-          "storage": 0.06,
-          "activeCost": 2.4650000000000003,
-          "underTarget": false
-        },
-        {
-          "activeHours": 365,
-          "variable": 4.389125,
-          "storage": 0.06,
-          "activeCost": 4.4491249999999996,
-          "underTarget": false
-        },
-        {
-          "activeHours": 730,
-          "variable": 8.77825,
-          "storage": 0.06,
-          "activeCost": 8.83825,
+          "activeCost": 29.259999999999998,
           "underTarget": false
         }
       ]
     }
   ],
-  "focus": [
-    {
-      "OriginChargeId": "charge-pool-all-ate-workers/default",
-      "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-19T11:57:58Z",
-      "BillingPeriodEnd": "2026-10-19T13:57:59.317765611Z",
-      "ChargePeriodStart": "2026-10-19T11:57:58Z",
-      "ChargePeriodEnd": "2026-10-19T13:57:59.317765611Z",
-      "ChargeCategory": "Usage",
-      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked)",
-      "ServiceProviderName": "Google Cloud",
-      "HostProviderName": "Google Cloud",
-      "ServiceName": "Kubernetes Engine",
-      "ServiceCategory": "Compute",
-      "ResourceId": "gke-worker-pool/all/ate-workers/default",
-      "ResourceName": "ate-workers/default",
-      "ResourceType": "WorkerPool",
-      "PricingUnit": "Hours",
-      "PricingQuantity": 0.7658533646,
-      "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.7658533646,
-      "ListCost": 0.0534613396,
-      "ContractedCost": 0.0534613396,
-      "EffectiveCost": 0.053461339600000005,
-      "BilledCost": 0,
-      "Tags": {
-        "finops.agent-substrate.dev/estimated": "true",
-        "finops.agent-substrate.dev/origin-basis": "booked",
-        "finops.agent-substrate.dev/summary-atespace": "all",
-        "finops.agent-substrate.dev/tier": "on-demand"
-      },
-      "AllocatedMethodId": "booked-share",
-      "AllocatedMethodDetails": {
-        "Elements": [
-          {
-            "AllocatedRatio": 0.30192042738296776,
-            "UsageQuantity": 1.333699379336389,
-            "UsageUnit": "vCPU-Hours",
-            "x_Method": "booked-share",
-            "x_PricePerUnit": 0.031611
-          },
-          {
-            "AllocatedRatio": 0.08093618333093912,
-            "UsageQuantity": 2.667398758672778,
-            "UsageUnit": "GiB-Hours",
-            "x_Method": "booked-share",
-            "x_PricePerUnit": 0.004237
-          }
-        ]
-      },
-      "AllocatedResourceId": "uid-child-0000001",
-      "AllocatedResourceName": "team-a/child",
-      "AllocatedTags": {
-        "finops.agent-substrate.dev/atespace": "team-a",
-        "finops.agent-substrate.dev/class": "agent",
-        "finops.agent-substrate.dev/is_agent": "true",
-        "finops.agent-substrate.dev/parent_agent_id": "team-a/root",
-        "finops.agent-substrate.dev/template": "team-a/support-agent",
-        "finops.agent-substrate.dev/tenant": "team-a",
-        "is_agent": "true",
-        "template": "team-a/support-agent",
-        "tenant": "team-a"
-      }
-    },
-    {
-      "OriginChargeId": "charge-pool-all-ate-workers/default",
-      "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-19T11:57:58Z",
-      "BillingPeriodEnd": "2026-10-19T13:57:59.317765611Z",
-      "ChargePeriodStart": "2026-10-19T11:57:58Z",
-      "ChargePeriodEnd": "2026-10-19T13:57:59.317765611Z",
-      "ChargeCategory": "Usage",
-      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked)",
-      "ServiceProviderName": "Google Cloud",
-      "HostProviderName": "Google Cloud",
-      "ServiceName": "Kubernetes Engine",
-      "ServiceCategory": "Compute",
-      "ResourceId": "gke-worker-pool/all/ate-workers/default",
-      "ResourceName": "ate-workers/default",
-      "ResourceType": "WorkerPool",
-      "PricingUnit": "Hours",
-      "PricingQuantity": 0.5743918857,
-      "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.5743918857,
-      "ListCost": 0.0400961347,
-      "ContractedCost": 0.0400961347,
-      "EffectiveCost": 0.040096134699999994,
-      "BilledCost": 0,
-      "Tags": {
-        "finops.agent-substrate.dev/estimated": "true",
-        "finops.agent-substrate.dev/origin-basis": "booked",
-        "finops.agent-substrate.dev/summary-atespace": "all",
-        "finops.agent-substrate.dev/tier": "on-demand"
-      },
-      "AllocatedMethodId": "booked-share",
-      "AllocatedMethodDetails": {
-        "Elements": [
-          {
-            "AllocatedRatio": 0.2264410543989561,
-            "UsageQuantity": 1.0002777777777778,
-            "UsageUnit": "vCPU-Hours",
-            "x_Method": "booked-share",
-            "x_PricePerUnit": 0.031611
-          },
-          {
-            "AllocatedRatio": 0.060702334615004794,
-            "UsageQuantity": 2.0005555555555556,
-            "UsageUnit": "GiB-Hours",
-            "x_Method": "booked-share",
-            "x_PricePerUnit": 0.004237
-          }
-        ]
-      },
-      "AllocatedResourceId": "uid-root-00000001",
-      "AllocatedResourceName": "team-a/root",
-      "AllocatedTags": {
-        "finops.agent-substrate.dev/atespace": "team-a",
-        "finops.agent-substrate.dev/class": "agent",
-        "finops.agent-substrate.dev/is_agent": "true",
-        "finops.agent-substrate.dev/template": "team-a/support-agent",
-        "finops.agent-substrate.dev/tenant": "team-a",
-        "is_agent": "true",
-        "template": "team-a/support-agent",
-        "tenant": "team-a"
-      }
-    },
-    {
-      "OriginChargeId": "charge-pool-all-ate-workers/default",
-      "BillingCurrency": "USD",
-      "BillingPeriodStart": "2026-10-19T11:57:58Z",
-      "BillingPeriodEnd": "2026-10-19T13:57:59.317765611Z",
-      "ChargePeriodStart": "2026-10-19T11:57:58Z",
-      "ChargePeriodEnd": "2026-10-19T13:57:59.317765611Z",
-      "ChargeCategory": "Usage",
-      "ChargeDescription": "Estimate, not a bill: worker pool compute at rate card prices (booked)",
-      "ServiceProviderName": "Google Cloud",
-      "HostProviderName": "Google Cloud",
-      "ServiceName": "Kubernetes Engine",
-      "ServiceCategory": "Compute",
-      "ResourceId": "gke-worker-pool/all/ate-workers/default",
-      "ResourceName": "ate-workers/default",
-      "ResourceType": "WorkerPool",
-      "PricingUnit": "Hours",
-      "PricingQuantity": 0.6601207957030558,
-      "ConsumedUnit": "Hours",
-      "ConsumedQuantity": 0.6601207957030558,
-      "ListCost": 0.046080547100000015,
-      "ContractedCost": 0.046080547100000015,
-      "EffectiveCost": 0.04608054710000001,
-      "BilledCost": 0,
-      "Tags": {
-        "finops.agent-substrate.dev/estimated": "true",
-        "finops.agent-substrate.dev/origin-basis": "booked",
-        "finops.agent-substrate.dev/summary-atespace": "all",
-        "finops.agent-substrate.dev/tier": "on-demand"
-      },
-      "AllocatedMethodId": "booked-share",
-      "AllocatedMethodDetails": {
-        "Elements": [
-          {
-            "AllocatedRatio": 0.3300000002721322,
-            "x_UnusedCapacityResourceId": "_unused_capacity"
-          }
-        ]
-      },
-      "AllocatedResourceId": "_unused_capacity",
-      "AllocatedResourceName": "(unused pool capacity)"
-    }
-  ],
-  "focusReconciliation": {
-    "resourceId": "gke-worker-pools/all",
-    "pool": "all",
-    "periodStart": "2026-10-19T11:57:58Z",
-    "periodEnd": "2026-10-19T13:57:59.317765611Z",
-    "estimated": true,
-    "originCost": 0.1396380214,
-    "allocated": 0.0935574743,
-    "unallocated": 0.0460805471,
-    "agents": 2,
-    "unsizedLeases": 0,
-    "estimatedLeases": 0,
-    "problems": []
-  },
   "outcomeCosts": {
     "completed": {
       "tasks": 1,
       "actors": 1,
       "totalCost": {
-        "USD": 0.040096134722
+        "USD": 0.041433333333
       }
     },
     "failed": {
       "tasks": 1,
       "actors": 1,
       "totalCost": {
-        "USD": 0.053461339621
+        "USD": 0.057083333333
       }
     },
     "unfinished": {
@@ -758,8 +653,10 @@
     },
     "noTask": {
       "tasks": 0,
-      "actors": 0,
-      "totalCost": {}
+      "actors": 1,
+      "totalCost": {
+        "USD": 0.01
+      }
     },
     "outcomeSource": "sandbox"
   }

@@ -83,7 +83,10 @@ type ComputeSummary struct {
 	VCPUSeconds  float64  `json:"vcpuSeconds" yaml:"vcpuSeconds"`
 	GiBSeconds   float64  `json:"gibSeconds" yaml:"gibSeconds"`
 	Cost         MoneyMap `json:"cost" yaml:"cost"`
-	MeasuredCost MoneyMap `json:"measuredCost,omitempty" yaml:"measuredCost,omitempty"`
+	// InFlightComputeCost is the part of Cost that open leases accrued up to
+	// the report.
+	InFlightComputeCost MoneyMap `json:"inFlightComputeCost,omitempty" yaml:"inFlightComputeCost,omitempty"`
+	MeasuredCost        MoneyMap `json:"measuredCost,omitempty" yaml:"measuredCost,omitempty"`
 	// MeasuredFallbackLeases had no usage sample, so their measured cost is
 	// the booked cost.
 	MeasuredFallbackLeases int64   `json:"measuredFallbackLeases,omitempty" yaml:"measuredFallbackLeases,omitempty"`
@@ -103,7 +106,10 @@ type ModelCost struct {
 	CacheWriteInputTokens int64            `json:"cacheWriteInputTokens,omitempty" yaml:"cacheWriteInputTokens,omitempty"`
 	ReasoningOutputTokens int64            `json:"reasoningOutputTokens,omitempty" yaml:"reasoningOutputTokens,omitempty"`
 	Cost                  MoneyMap         `json:"cost" yaml:"cost"`
+	WebSearchRequests     int64            `json:"webSearchRequests,omitempty" yaml:"webSearchRequests,omitempty"`
 	UnpricedCalls         int64            `json:"unpricedCalls,omitempty" yaml:"unpricedCalls,omitempty"`
+	UnknownCostCalls      int64            `json:"unknownCostCalls,omitempty" yaml:"unknownCostCalls,omitempty"`
+	LowerBoundCalls       int64            `json:"lowerBoundCalls,omitempty" yaml:"lowerBoundCalls,omitempty"`
 	UsageStatus           map[string]int64 `json:"usageStatus,omitempty" yaml:"usageStatus,omitempty"`
 	LastCall              string           `json:"lastCall,omitempty" yaml:"lastCall,omitempty"`
 }
@@ -262,22 +268,13 @@ type CurveReport struct {
 	Tiers              []TierCurve `json:"tiers" yaml:"tiers"`
 }
 
-// FocusElement describes one resource element in FOCUS AllocatedMethodDetails.
+// FocusElement is one usage key in FOCUS AllocatedMethodDetails: a quantity of
+// a unit (vCPU-Hours, GiB-Hours, Slot-Hours, Tokens, Priced-Tokens, Agents,
+// Agent-Months). Priced-Tokens carries the currency of its quantity.
 type FocusElement struct {
-	AllocatedRatio           float64 `json:"AllocatedRatio,omitempty" yaml:"AllocatedRatio,omitempty"`
-	UsageQuantity            float64 `json:"UsageQuantity,omitempty" yaml:"UsageQuantity,omitempty"`
-	UsageUnit                string  `json:"UsageUnit,omitempty" yaml:"UsageUnit,omitempty"`
-	PricePerUnit             float64 `json:"x_PricePerUnit,omitempty" yaml:"x_PricePerUnit,omitempty"`
-	UnusedCapacityResourceID string  `json:"x_UnusedCapacityResourceId,omitempty" yaml:"x_UnusedCapacityResourceId,omitempty"`
-	// Method is the method that produced the row's numbers, which can
-	// differ from AllocatedMethodId when usage samples are missing.
-	Method               string   `json:"x_Method,omitempty" yaml:"x_Method,omitempty"`
-	MeasuredLeases       int64    `json:"x_MeasuredLeases,omitempty" yaml:"x_MeasuredLeases,omitempty"`
-	BookedFallbackLeases int64    `json:"x_BookedFallbackLeases,omitempty" yaml:"x_BookedFallbackLeases,omitempty"`
-	IdleVCPUHours        *float64 `json:"x_IdleVCPUHours,omitempty" yaml:"x_IdleVCPUHours,omitempty"`
-	IdleGiBHours         *float64 `json:"x_IdleGiBHours,omitempty" yaml:"x_IdleGiBHours,omitempty"`
-	ExpectedIdleCost     *float64 `json:"x_ExpectedIdleCost,omitempty" yaml:"x_ExpectedIdleCost,omitempty"`
-	PriceGap             *float64 `json:"x_PriceGap,omitempty" yaml:"x_PriceGap,omitempty"`
+	UsageQuantity float64 `json:"UsageQuantity" yaml:"UsageQuantity"`
+	UsageUnit     string  `json:"UsageUnit" yaml:"UsageUnit"`
+	Currency      string  `json:"x_Currency,omitempty" yaml:"x_Currency,omitempty"`
 }
 
 // FocusMethodDetails holds FOCUS 1.3 AllocatedMethodDetails.
@@ -285,107 +282,68 @@ type FocusMethodDetails struct {
 	Elements []FocusElement `json:"Elements,omitempty" yaml:"Elements,omitempty"`
 }
 
-// EstimatedTag is the FOCUS tag that finops sets to "true" on a charge that
-// comes from rate card prices rather than from the bill.
-const EstimatedTag = "finops.agent-substrate.dev/estimated"
+// TagPrefix is the prefix of the tags that the Cost Service sets on an
+// allocation key.
+const TagPrefix = "agent-cost/"
 
-// FocusCharge represents one FOCUS 1.3 split cost allocation row.
-type FocusCharge struct {
-	OriginChargeID         string             `json:"OriginChargeId" yaml:"OriginChargeId"`
-	BillingAccountID       string             `json:"BillingAccountId,omitempty" yaml:"BillingAccountId,omitempty"`
-	BillingCurrency        string             `json:"BillingCurrency" yaml:"BillingCurrency"`
-	ChargeClass            string             `json:"ChargeClass,omitempty" yaml:"ChargeClass,omitempty"`
-	RegionID               string             `json:"RegionId,omitempty" yaml:"RegionId,omitempty"`
-	Tags                   map[string]string  `json:"Tags,omitempty" yaml:"Tags,omitempty"`
-	BillingPeriodStart     string             `json:"BillingPeriodStart,omitempty" yaml:"BillingPeriodStart,omitempty"`
-	BillingPeriodEnd       string             `json:"BillingPeriodEnd,omitempty" yaml:"BillingPeriodEnd,omitempty"`
-	ChargePeriodStart      string             `json:"ChargePeriodStart,omitempty" yaml:"ChargePeriodStart,omitempty"`
-	ChargePeriodEnd        string             `json:"ChargePeriodEnd,omitempty" yaml:"ChargePeriodEnd,omitempty"`
-	ChargeCategory         string             `json:"ChargeCategory,omitempty" yaml:"ChargeCategory,omitempty"`
-	ChargeDescription      string             `json:"ChargeDescription,omitempty" yaml:"ChargeDescription,omitempty"`
+// Units of FocusElement.UsageUnit.
+const (
+	UnitVCPUHours    = "vCPU-Hours"
+	UnitGiBHours     = "GiB-Hours"
+	UnitSlotHours    = "Slot-Hours"
+	UnitTokens       = "Tokens"
+	UnitPricedTokens = "Priced-Tokens"
+)
+
+// AllocationKey is one FOCUS 1.3 allocation key: how much of one origin
+// resource (a worker pool, a model provider, snapshot storage, a volume) one
+// agent used in the charge period. It carries no ratio and no cost: the
+// holder of the bill divides each key by its resource's total and writes the
+// split cost rows.
+type AllocationKey struct {
+	ChargePeriodStart      string             `json:"ChargePeriodStart" yaml:"ChargePeriodStart"`
+	ChargePeriodEnd        string             `json:"ChargePeriodEnd" yaml:"ChargePeriodEnd"`
 	ServiceProviderName    string             `json:"ServiceProviderName,omitempty" yaml:"ServiceProviderName,omitempty"`
-	HostProviderName       string             `json:"HostProviderName,omitempty" yaml:"HostProviderName,omitempty"`
-	InvoiceIssuerName      string             `json:"InvoiceIssuerName,omitempty" yaml:"InvoiceIssuerName,omitempty"`
 	ServiceName            string             `json:"ServiceName,omitempty" yaml:"ServiceName,omitempty"`
 	ServiceCategory        string             `json:"ServiceCategory,omitempty" yaml:"ServiceCategory,omitempty"`
 	ResourceID             string             `json:"ResourceId,omitempty" yaml:"ResourceId,omitempty"`
 	ResourceName           string             `json:"ResourceName,omitempty" yaml:"ResourceName,omitempty"`
 	ResourceType           string             `json:"ResourceType,omitempty" yaml:"ResourceType,omitempty"`
-	PricingUnit            string             `json:"PricingUnit,omitempty" yaml:"PricingUnit,omitempty"`
-	PricingQuantity        float64            `json:"PricingQuantity,omitempty" yaml:"PricingQuantity,omitempty"`
-	ConsumedUnit           string             `json:"ConsumedUnit,omitempty" yaml:"ConsumedUnit,omitempty"`
-	ConsumedQuantity       float64            `json:"ConsumedQuantity,omitempty" yaml:"ConsumedQuantity,omitempty"`
-	ListCost               float64            `json:"ListCost" yaml:"ListCost"`
-	ContractedCost         float64            `json:"ContractedCost" yaml:"ContractedCost"`
-	EffectiveCost          float64            `json:"EffectiveCost" yaml:"EffectiveCost"`
-	BilledCost             float64            `json:"BilledCost" yaml:"BilledCost"`
-	AllocatedMethodID      string             `json:"AllocatedMethodId,omitempty" yaml:"AllocatedMethodId,omitempty"`
-	AllocatedMethodDetails FocusMethodDetails `json:"AllocatedMethodDetails,omitempty" yaml:"AllocatedMethodDetails,omitempty"`
+	AllocatedMethodID      string             `json:"AllocatedMethodId" yaml:"AllocatedMethodId"`
+	AllocatedMethodDetails FocusMethodDetails `json:"AllocatedMethodDetails" yaml:"AllocatedMethodDetails"`
 	AllocatedResourceID    string             `json:"AllocatedResourceId,omitempty" yaml:"AllocatedResourceId,omitempty"`
 	AllocatedResourceName  string             `json:"AllocatedResourceName,omitempty" yaml:"AllocatedResourceName,omitempty"`
 	AllocatedTags          map[string]string  `json:"AllocatedTags,omitempty" yaml:"AllocatedTags,omitempty"`
 }
 
-// Estimated reports whether the charge is an estimate from rate card prices.
-func (c FocusCharge) Estimated() bool {
-	return c.Tags[EstimatedTag] == "true" || c.AllocatedTags[EstimatedTag] == "true"
-}
-
-// FocusReconciliation summarizes bottom-up vs. origin charge reconciliation.
-type FocusReconciliation struct {
-	ResourceID    string  `json:"resourceId" yaml:"resourceId"`
-	Pool          string  `json:"pool" yaml:"pool"`
-	PeriodStart   string  `json:"periodStart" yaml:"periodStart"`
-	PeriodEnd     string  `json:"periodEnd" yaml:"periodEnd"`
-	Estimated     bool    `json:"estimated" yaml:"estimated"`
-	OriginCost    float64 `json:"originCost" yaml:"originCost"`
-	Allocated     float64 `json:"allocated" yaml:"allocated"`
-	Unallocated   float64 `json:"unallocated" yaml:"unallocated"`
-	Agents        int     `json:"agents" yaml:"agents"`
-	UnsizedLeases int     `json:"unsizedLeases" yaml:"unsizedLeases"`
-	// EstimatedLeases had a start or end that no lifecycle record showed.
-	EstimatedLeases int      `json:"estimatedLeases,omitempty" yaml:"estimatedLeases,omitempty"`
-	Problems        []string `json:"problems,omitempty" yaml:"problems,omitempty"`
-	// ExpectedIdle is the idle capacity at rate card prices, when the pool's
-	// capacity is known.
-	ExpectedIdle *float64 `json:"expectedIdle,omitempty" yaml:"expectedIdle,omitempty"`
-	// PriceGap compares the bill with capacity at rate card prices; it does
-	// not depend on the leases. Older servers send it as Gap.
-	PriceGap *float64 `json:"priceGap,omitempty" yaml:"priceGap,omitempty"`
-	Gap      *float64 `json:"gap,omitempty" yaml:"gap,omitempty"`
-	// The coverage check compares the leases' hours with the activation
-	// hours in the runtime's usage records, which come from another source.
-	CoverageLeaseHours      *float64 `json:"coverageLeaseHours,omitempty" yaml:"coverageLeaseHours,omitempty"`
-	CoverageActivationHours *float64 `json:"coverageActivationHours,omitempty" yaml:"coverageActivationHours,omitempty"`
-	CoverageCoveredHours    *float64 `json:"coverageCoveredHours,omitempty" yaml:"coverageCoveredHours,omitempty"`
-	CoverageExcessHours     *float64 `json:"coverageExcessHours,omitempty" yaml:"coverageExcessHours,omitempty"`
-	CoverageRatio           *float64 `json:"coverageRatio,omitempty" yaml:"coverageRatio,omitempty"`
-}
-
-// PriceGapValue returns PriceGap, or Gap from an older server, or nil.
-func (r FocusReconciliation) PriceGapValue() *float64 {
-	if r.PriceGap != nil {
-		return r.PriceGap
+// Quantity returns the key's quantity of unit, and whether it has one.
+func (k AllocationKey) Quantity(unit string) (float64, bool) {
+	for _, e := range k.AllocatedMethodDetails.Elements {
+		if e.UsageUnit == unit {
+			return e.UsageQuantity, true
+		}
 	}
-	return r.Gap
+	return 0, false
 }
 
-// FocusReport is the response from GET /v1/costs/focus.
+// Tag returns the agent-cost/ tag name, else the unprefixed tag name.
+func (k AllocationKey) Tag(name string) string {
+	if v := k.AllocatedTags[TagPrefix+name]; v != "" {
+		return v
+	}
+	return k.AllocatedTags[name]
+}
+
+// FocusReportKind is the FocusReport.Kind of allocation keys.
+const FocusReportKind = "allocation-keys"
+
+// FocusReport is the response from GET /v1/costs/focus: FOCUS 1.3 allocation
+// keys for the charge period, not FOCUS cost rows.
 type FocusReport struct {
-	// OriginCharge is the first of OriginCharges, one per pool, and
-	// Reconciliation totals Reconciliations.
-	OriginCharge     FocusCharge           `json:"originCharge" yaml:"originCharge"`
-	OriginCharges    []FocusCharge         `json:"originCharges,omitempty" yaml:"originCharges,omitempty"`
-	Charges          []FocusCharge         `json:"charges" yaml:"charges"`
-	AuxiliaryCharges []FocusCharge         `json:"auxiliaryCharges,omitempty" yaml:"auxiliaryCharges,omitempty"`
-	Reconciliation   *FocusReconciliation  `json:"reconciliation,omitempty" yaml:"reconciliation,omitempty"`
-	Reconciliations  []FocusReconciliation `json:"reconciliations,omitempty" yaml:"reconciliations,omitempty"`
-}
-
-// Estimated reports whether the report's origin is an estimate from rate
-// card prices rather than a bill.
-func (f FocusReport) Estimated() bool {
-	return (f.Reconciliation != nil && f.Reconciliation.Estimated) || f.OriginCharge.Estimated()
+	Kind              string          `json:"kind" yaml:"kind"`
+	ChargePeriodStart string          `json:"chargePeriodStart" yaml:"chargePeriodStart"`
+	ChargePeriodEnd   string          `json:"chargePeriodEnd" yaml:"chargePeriodEnd"`
+	AllocationKeys    []AllocationKey `json:"allocationKeys" yaml:"allocationKeys"`
 }
 
 // CostBasisEstimated is the CostReport.CostBasis of numbers that come from
@@ -401,26 +359,28 @@ type CostReport struct {
 	// its totals then cover only that atespace.
 	Atespace string `json:"atespace,omitempty" yaml:"atespace,omitempty"`
 	// CostBasis says how far the numbers can be trusted, e.g. "estimated".
-	CostBasis              string               `json:"costBasis,omitempty" yaml:"costBasis,omitempty"`
-	Totals                 Totals               `json:"totals" yaml:"totals"`
-	Compute                ComputeSummary       `json:"compute" yaml:"compute"`
-	TotalCost              MoneyMap             `json:"totalCost" yaml:"totalCost"`
-	Actors                 []ActorCost          `json:"actors" yaml:"actors"`
-	Templates              []TemplateCost       `json:"templates,omitempty" yaml:"templates,omitempty"`
-	Sessions               []SessionCost        `json:"sessions,omitempty" yaml:"sessions,omitempty"`
-	Curve                  []TierCurve          `json:"curve,omitempty" yaml:"curve,omitempty"`
-	Focus                  []FocusCharge        `json:"focus,omitempty" yaml:"focus,omitempty"`
-	FocusReconciliation    *FocusReconciliation `json:"focusReconciliation,omitempty" yaml:"focusReconciliation,omitempty"`
-	CrossTenantParentLinks int                  `json:"crossTenantParentLinks,omitempty" yaml:"crossTenantParentLinks,omitempty"`
-	OutcomeCosts           *OutcomeCosts        `json:"outcomeCosts,omitempty" yaml:"outcomeCosts,omitempty"`
+	CostBasis string `json:"costBasis,omitempty" yaml:"costBasis,omitempty"`
+	// EstimatedFlag is the server's "estimated": true when the numbers come
+	// from the rate card and not from a bill. Read it through Estimated.
+	EstimatedFlag bool           `json:"estimated,omitempty" yaml:"estimated,omitempty"`
+	Totals        Totals         `json:"totals" yaml:"totals"`
+	Compute       ComputeSummary `json:"compute" yaml:"compute"`
+	// InFlightComputeCost is what the open leases accrued up to the report.
+	// It is already part of Compute.Cost and TotalCost.
+	InFlightComputeCost    MoneyMap       `json:"inFlightComputeCost,omitempty" yaml:"inFlightComputeCost,omitempty"`
+	TotalCost              MoneyMap       `json:"totalCost" yaml:"totalCost"`
+	Actors                 []ActorCost    `json:"actors" yaml:"actors"`
+	Templates              []TemplateCost `json:"templates,omitempty" yaml:"templates,omitempty"`
+	Sessions               []SessionCost  `json:"sessions,omitempty" yaml:"sessions,omitempty"`
+	Curve                  []TierCurve    `json:"curve,omitempty" yaml:"curve,omitempty"`
+	CrossTenantParentLinks int            `json:"crossTenantParentLinks,omitempty" yaml:"crossTenantParentLinks,omitempty"`
+	OutcomeCosts           *OutcomeCosts  `json:"outcomeCosts,omitempty" yaml:"outcomeCosts,omitempty"`
 }
 
 // Estimated reports whether the report's numbers are estimates: the server
-// says so, or it says nothing (finops prices from a rate card unless a bill
-// is reconciled).
+// says so, or it says nothing (the Cost Service prices from a rate card).
 func (r CostReport) Estimated() bool {
-	return r.CostBasis == "" || r.CostBasis == CostBasisEstimated ||
-		(r.FocusReconciliation != nil && r.FocusReconciliation.Estimated)
+	return r.EstimatedFlag || r.CostBasis == "" || r.CostBasis == CostBasisEstimated
 }
 
 // Client queries the FinOps HTTP server.
@@ -620,8 +580,8 @@ func (c *Client) GetCurve(ctx context.Context) (*CurveReport, []byte, error) {
 	return &curve, raw, nil
 }
 
-// GetFocus fetches the FOCUS 1.3 split cost allocation report from
-// GET /v1/costs/focus, decoded and as the server sent it.
+// GetFocus fetches the FOCUS 1.3 allocation keys from GET /v1/costs/focus,
+// decoded and as the server sent it.
 func (c *Client) GetFocus(ctx context.Context, atespace string) (*FocusReport, []byte, error) {
 	var focus FocusReport
 	raw, err := c.getJSON(ctx, "/v1/costs/focus", atespaceQuery(atespace), &focus)
@@ -631,7 +591,7 @@ func (c *Client) GetFocus(ctx context.Context, atespace string) (*FocusReport, [
 	return &focus, raw, nil
 }
 
-// GetFocusCSV fetches the FOCUS 1.3 split cost allocation rows in CSV format.
+// GetFocusCSV fetches the FOCUS 1.3 allocation keys in CSV format.
 func (c *Client) GetFocusCSV(ctx context.Context, atespace string) (string, error) {
 	q := atespaceQuery(atespace)
 	if q == nil {
