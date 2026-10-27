@@ -173,14 +173,19 @@ ax tunnel list                        # background tunnels (state lives in ~/.ax
 ax tunnel stop
 ax version
 
-# Agent FinOps cost attribution (requires FinOps deployed in ate-finops)
+# Cost attribution, budgets, and holds (requires the Cost Service, cost.ate-cost.svc)
 ax cost -a my-atespace                # per-task / per-actor cost summary
 ax cost -A -o wide                    # all atespaces with UID, measured cost, and sub-agent tree cost
 ax cost task task123                  # 3-number hosting cost, LLM spend, budget, outcome, sub-agents, and sessions
 ax cost curve                         # < $1.00 / agent-month hosting sensitivity curve
 ax cost focus                         # FOCUS 1.3 allocation keys (usage per agent and origin resource)
 ax cost focus -o csv                  # export the allocation keys as CSV for the bill holder's split
-ax cost -a my-atespace -o json        # the FinOps server's response, unchanged
+ax cost budgets                       # budget state (OK, WARN, EXHAUSTED), spend vs limit, and held actors
+ax cost -a my-atespace -o json        # the Cost Service's response, unchanged
+
+# Task budgets (spec.budget; the Cost Service enforces them through holds)
+ax budget set task123 --max-usd 5 --warn-at 0.8   # raise or set a tree budget; a raise lets held tasks resume
+ax budget clear task123                          # remove the limit
 ```
 
 ### Works with `kubectx`
@@ -206,8 +211,8 @@ ax --context=dev-cluster get tasks
 | `-n`, `--namespace` | Kubernetes namespace where AX is installed | `ax-system` |
 | `--context` | Kubernetes context to target | active `kubectx` / `current-context` |
 | `--server` | Control plane address, bypassing auto-detection | derived from kube context, or `$AX_SERVER` |
-| `--finops-server` | FinOps HTTP API address, bypassing auto-detection | derived from kube context (`svc/finops:9090`), or `$AX_FINOPS_SERVER` |
-| `--finops-namespace` | Kubernetes namespace where FinOps is installed | `ate-finops` |
+| `--cost-server` | Cost Service HTTP API address, bypassing auto-detection (`--finops-server` still works) | derived from kube context (`svc/cost:9090`), or `$AX_COST_SERVER` |
+| `--cost-namespace` | Kubernetes namespace where the Cost Service is installed | `ate-cost` |
 
 ## License
 

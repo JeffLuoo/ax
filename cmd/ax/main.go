@@ -49,15 +49,15 @@ func main() {
 
 	opts := parseGlobalArgs(os.Args[1:])
 	var (
-		cmd             = opts.cmd
-		cleanArgs       = opts.args
-		atespace        = opts.atespace
-		atespaceSet     = opts.atespaceSet
-		explicitServer  = opts.server
-		kubeContext     = opts.kubeContext
-		axNamespace     = opts.namespace
-		finopsServer    = opts.finopsServer
-		finopsNamespace = opts.finopsNamespace
+		cmd            = opts.cmd
+		cleanArgs      = opts.args
+		atespace       = opts.atespace
+		atespaceSet    = opts.atespaceSet
+		explicitServer = opts.server
+		kubeContext    = opts.kubeContext
+		axNamespace    = opts.namespace
+		costServer     = opts.costServer
+		costNamespace  = opts.costNamespace
 	)
 
 	if cmd == "" {
@@ -96,17 +96,17 @@ func main() {
 			fmt.Println(costUsage)
 			return
 		}
-		finopsURL, err := tunnel.EnsureFinOpsURL(tunnel.Options{
-			ServerURL: finopsServer,
+		costURL, err := tunnel.EnsureCostURL(tunnel.Options{
+			ServerURL: costServer,
 			Context:   kubeContext,
-			Namespace: finopsNamespace,
+			Namespace: costNamespace,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 		axURL := resolveOptionalAXServerURL(explicitServer, kubeContext)
-		if err := runCost(finopsURL, axURL, atespace, atespaceSet, cleanArgs); err != nil {
+		if err := runCost(costURL, axURL, atespace, atespaceSet, cleanArgs); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -141,13 +141,15 @@ func main() {
 	case "get":
 		err = runGet(serverURL, atespace, cleanArgs)
 	case "describe":
-		err = runDescribe(serverURL, atespace, finopsServer, kubeContext, cleanArgs)
+		err = runDescribe(serverURL, atespace, costServer, kubeContext, cleanArgs)
 	case "watch":
 		err = runWatch(serverURL, atespace, cleanArgs)
 	case "suspend":
 		err = runSuspend(serverURL, atespace, cleanArgs)
 	case "resume":
 		err = runResume(serverURL, atespace, cleanArgs)
+	case "budget":
+		err = runBudget(serverURL, atespace, cleanArgs)
 	case "delete":
 		err = runDelete(serverURL, atespace, cleanArgs)
 	case "ssh":
@@ -171,12 +173,12 @@ type globalArgs struct {
 	args     []string
 	atespace string
 	// atespaceSet is true when -a or --atespace was given, even as "default".
-	atespaceSet     bool
-	server          string
-	kubeContext     string
-	namespace       string
-	finopsServer    string
-	finopsNamespace string
+	atespaceSet   bool
+	server        string
+	kubeContext   string
+	namespace     string
+	costServer    string
+	costNamespace string
 }
 
 // parseGlobalArgs extracts the command name and the global flags from args. It
@@ -205,20 +207,21 @@ func parseGlobalArgs(args []string) globalArgs {
 			}
 		} else if strings.HasPrefix(arg, "--server=") {
 			g.server = strings.TrimPrefix(arg, "--server=")
-		} else if arg == "--finops-server" {
+		} else if arg == "--cost-server" || arg == "--finops-server" {
+			// --finops-server is the old name, kept so scripts still work.
 			if i+1 < len(args) {
-				g.finopsServer = args[i+1]
+				g.costServer = args[i+1]
 				i++
 			}
-		} else if strings.HasPrefix(arg, "--finops-server=") {
-			g.finopsServer = strings.TrimPrefix(arg, "--finops-server=")
-		} else if arg == "--finops-namespace" {
+		} else if v, ok := cutFlag(arg, "--cost-server", "--finops-server"); ok {
+			g.costServer = v
+		} else if arg == "--cost-namespace" || arg == "--finops-namespace" {
 			if i+1 < len(args) {
-				g.finopsNamespace = args[i+1]
+				g.costNamespace = args[i+1]
 				i++
 			}
-		} else if strings.HasPrefix(arg, "--finops-namespace=") {
-			g.finopsNamespace = strings.TrimPrefix(arg, "--finops-namespace=")
+		} else if v, ok := cutFlag(arg, "--cost-namespace", "--finops-namespace"); ok {
+			g.costNamespace = v
 		} else if arg == "--context" {
 			if i+1 < len(args) {
 				g.kubeContext = args[i+1]
@@ -242,6 +245,16 @@ func parseGlobalArgs(args []string) globalArgs {
 	return g
 }
 
+// cutFlag returns the value of a --name=value argument for any of names.
+func cutFlag(arg string, names ...string) (string, bool) {
+	for _, n := range names {
+		if v, ok := strings.CutPrefix(arg, n+"="); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 func printUsage() {
 	fmt.Println(`AX CLI - Autonomous agent execution control
 
@@ -256,18 +269,21 @@ Available Commands:
   get workspace <name>    Get a specific workspace
   get models              List models
   get model <name>        Get a specific model
-  describe task <name>    Show detailed information about a task (including FinOps cost when available)
+  describe task <name>    Show detailed information about a task (including cost, budget, and holds when available)
   describe workspace <name> Show detailed information about a workspace
   describe model <name>   Show detailed information about a model
-  cost [tasks|actors]     Show Agent FinOps cost summary across tasks and actors
+  cost [tasks|actors]     Show the cost summary across tasks and actors
   cost task <name>        Show 3-number hosting cost, LLM spend, budget, outcome, sub-agent tree, and sessions
   cost curve              Show < $1.00 / agent-month hosting cost sensitivity curve (On-Demand, CUD, Spot)
   cost focus              Show FOCUS 1.3 allocation keys: usage per agent and origin resource, no cost
+  cost budgets            Show budget states (OK, WARN, EXHAUSTED), spend vs limit, and held actors
   watch task <name>       Stream live status and condition updates for a task
   ssh <task-name> [-- cmd] Run a command or shell inside the running task container
                           (Ctrl-C is forwarded; press it twice quickly, or Ctrl-\, to exit locally)
   suspend task <name>     Suspend execution of a task and checkpoint state
-  resume task <name>      Resume execution of a suspended task
+  resume task <name>      Resume execution of a suspended task (fails while the task's actor has a hold)
+  budget set <task> --max-usd N  Set or raise a task budget (labels its actors for the Cost Service)
+  budget clear <task>     Remove a task budget
   delete task <name>      Delete a task
   delete workspace <name> Delete a workspace
   delete model <name>     Delete a model
@@ -280,8 +296,8 @@ Flags:
   -n, --namespace string        Kubernetes namespace where AX is installed (default: "ax-system")
   --context string              Kubernetes context (defaults to active kubectx / current-context)
   --server string               AX API server address (default: auto-detected from kube context or $AX_SERVER)
-  --finops-server string        FinOps HTTP server address (default: auto-detected from kube context or $AX_FINOPS_SERVER)
-  --finops-namespace string     Kubernetes namespace where FinOps is installed (default: "ate-finops")`)
+  --cost-server string          Cost Service HTTP API address (default: auto-detected from kube context or $AX_COST_SERVER)
+  --cost-namespace string       Kubernetes namespace where the Cost Service is installed (default: "ate-cost")`)
 }
 
 // axCredentials gives the bearer token that ax-server verifies with a
@@ -449,7 +465,7 @@ func runGet(serverURL, atespace string, args []string) error {
 		tasks := resp.Tasks
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 8, 3, ' ', 0)
-		fmt.Fprintln(w, "NAME\tATESPACE\tPHASE\tACTOR\tWORKER-IP\tAGE")
+		fmt.Fprintln(w, "NAME\tATESPACE\tPHASE\tACTOR\tWORKER-IP\tAGE\tHOLDS")
 		for _, t := range tasks {
 			workerIP := ""
 			actor := ""
@@ -477,13 +493,14 @@ func runGet(serverURL, atespace string, args []string) error {
 					age = formatAge(time.Since(t.Metadata.CreateTime.AsTime()))
 				}
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				name,
 				tAtespace,
 				phase,
 				actor,
 				workerIP,
 				age,
+				holdNames(t.GetStatus().GetHolds()),
 			)
 		}
 		return w.Flush()
@@ -590,7 +607,7 @@ func runGet(serverURL, atespace string, args []string) error {
 	return fmt.Errorf("unknown resource %q", resource)
 }
 
-func runDescribe(serverURL, atespace, finopsServer, kubeContext string, args []string) error {
+func runDescribe(serverURL, atespace, costServer, kubeContext string, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: ax describe <task|workspace|model> <name>")
 	}
@@ -729,14 +746,20 @@ func runDescribe(serverURL, atespace, finopsServer, kubeContext string, args []s
 
 	fmt.Printf("Name:         %s\n", taskName)
 	fmt.Printf("Atespace:     %s\n", taskAtespace)
+	if len(task.GetStatus().GetHolds()) > 0 {
+		phase += " (held by " + holdNames(task.GetStatus().GetHolds()) + ")"
+	}
 	fmt.Printf("Phase:        %s\n", phase)
 	fmt.Printf("Actor:        %s\n", actor)
 	fmt.Printf("Worker IP:    %s\n", workerIP)
 	if parent := task.GetSpec().GetParent(); parent != "" {
 		fmt.Printf("Parent:       %s\n", parent)
 	}
-	if budget := task.GetSpec().GetBudget().GetMaxUsd(); budget > 0 {
-		fmt.Printf("Budget:       $%.2f\n", budget)
+	if b := task.GetSpec().GetBudget(); b.GetMaxUsd() > 0 {
+		fmt.Printf("Budget:       %s\n", describeBudget(b))
+	}
+	if g := task.GetStatus().GetBudgetGroup(); g != "" {
+		fmt.Printf("Budget Group: %s\n", g)
 	}
 	if outcome := task.GetStatus().GetOutcome(); outcome != "" {
 		finished := ""
@@ -765,6 +788,11 @@ func runDescribe(serverURL, atespace, finopsServer, kubeContext string, args []s
 		}
 	}
 
+	if holds := task.GetStatus().GetHolds(); len(holds) > 0 {
+		fmt.Println()
+		printHolds(os.Stdout, holds)
+	}
+
 	if len(conditions) > 0 {
 		fmt.Println("\nConditions:")
 		w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
@@ -775,8 +803,8 @@ func runDescribe(serverURL, atespace, finopsServer, kubeContext string, args []s
 		_ = w.Flush()
 	}
 
-	if finopsURL := resolveOptionalFinOpsURL(finopsServer, kubeContext); finopsURL != "" {
-		tryPrintTaskDescribeCost(os.Stdout, finopsURL, task, lookupAXTasks(ctx, serverURL, firstNonEmpty(taskAtespace, "default")))
+	if costURL := resolveOptionalCostURL(costServer, kubeContext); costURL != "" {
+		tryPrintTaskDescribeCost(os.Stdout, costURL, task, lookupAXTasks(ctx, serverURL, firstNonEmpty(taskAtespace, "default")))
 	}
 
 	return nil
@@ -1027,15 +1055,15 @@ func runContext(kubeContext string) error {
 	} else {
 		fmt.Println("AX Tunnel:                 No background tunnel running (will auto-connect on next command)")
 	}
-	if ft, err := tunnel.GetTunnel(ctxName + "-finops"); err == nil && ft != nil {
+	if ft, err := tunnel.GetTunnel(tunnel.CostTunnelKey(ctxName)); err == nil && ft != nil {
 		status := "Healthy"
-		if !tunnel.IsFinOpsTunnelHealthy(ft.Port) {
+		if !tunnel.IsCostTunnelHealthy(ft.Port) {
 			status = "Stale / Not responding"
 		}
-		fmt.Printf("FinOps Tunnel:             http://127.0.0.1:%d -> %s/svc/%s:9090 (PID: %d, %s)\n",
+		fmt.Printf("Cost Service Tunnel:       http://127.0.0.1:%d -> %s/svc/%s:9090 (PID: %d, %s)\n",
 			ft.Port, ft.Namespace, ft.Service, ft.PID, status)
-	} else if u := resolveOptionalFinOpsURL("", ctxName); u != "" {
-		fmt.Printf("FinOps Endpoint:           %s (healthy)\n", u)
+	} else if u := resolveOptionalCostURL("", ctxName); u != "" {
+		fmt.Printf("Cost Service Endpoint:     %s (healthy)\n", u)
 	}
 	return nil
 }
@@ -1060,8 +1088,8 @@ func runTunnel(args []string) error {
 		for _, t := range tunnels {
 			status := "Active"
 			healthy := false
-			if t.Service == "finops" || strings.HasSuffix(t.Context, "-finops") {
-				healthy = tunnel.IsFinOpsTunnelHealthy(t.Port)
+			if t.Service == "cost" || t.Service == "finops" || strings.HasSuffix(t.Context, "-cost") || strings.HasSuffix(t.Context, "-finops") {
+				healthy = tunnel.IsCostTunnelHealthy(t.Port)
 			} else {
 				healthy = tunnel.IsTunnelHealthy(t.Port)
 			}
@@ -1285,11 +1313,12 @@ func stdinIsTerminal() bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
-// stopContextTunnels stops the AX server tunnel and the FinOps tunnel saved
+// stopContextTunnels stops the AX server tunnel and the Cost Service tunnel saved
 // for a kube context. It fails only when neither exists.
 func stopContextTunnels(out io.Writer, ctxName string) error {
 	stopped := 0
-	for _, key := range []string{ctxName, tunnel.FinOpsTunnelKey(ctxName)} {
+	// <context>-finops is the Cost Service tunnel key of older ax releases.
+	for _, key := range []string{ctxName, tunnel.CostTunnelKey(ctxName), ctxName + "-finops"} {
 		if err := tunnel.StopTunnelByContext(key); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue

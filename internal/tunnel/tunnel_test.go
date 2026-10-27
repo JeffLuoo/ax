@@ -79,41 +79,42 @@ func healthOnlyServer(t *testing.T, path string) int {
 	return port
 }
 
-func TestIsFinOpsTunnelHealthy_ProbesHealthz(t *testing.T) {
-	if !IsFinOpsTunnelHealthy(healthOnlyServer(t, "/healthz")) {
+func TestIsCostTunnelHealthy_ProbesHealthz(t *testing.T) {
+	if !IsCostTunnelHealthy(healthOnlyServer(t, "/healthz")) {
 		t.Error("a server that answers /healthz is not healthy")
 	}
 	// /v1/costs builds a full report; it is not the health check.
-	if IsFinOpsTunnelHealthy(healthOnlyServer(t, "/v1/costs")) {
+	if IsCostTunnelHealthy(healthOnlyServer(t, "/v1/costs")) {
 		t.Error("a server without /healthz counts as healthy")
 	}
 }
 
-func TestEnsureFinOpsURL_UsesOnlyTheContextsTunnel(t *testing.T) {
+func TestEnsureCostURL_UsesOnlyTheContextsTunnel(t *testing.T) {
 	t.Setenv("AX_HOME", t.TempDir())
+	t.Setenv("AX_COST_SERVER", "")
 	t.Setenv("AX_FINOPS_SERVER", "")
 	t.Setenv("KUBECONTEXT", "")
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "none"))
 	// No kubectl: a new port-forward cannot start.
 	t.Setenv("PATH", t.TempDir())
 
-	if _, err := EnsureFinOpsURL(Options{}); err == nil {
-		t.Error("EnsureFinOpsURL without a kube context did not fail")
+	if _, err := EnsureCostURL(Options{}); err == nil {
+		t.Error("EnsureCostURL without a kube context did not fail")
 	}
 
 	port := healthOnlyServer(t, "/healthz")
-	if err := SaveTunnel(&TunnelInfo{Context: FinOpsTunnelKey("staging"), Namespace: "ate-finops", Service: "finops", Port: port}); err != nil {
+	if err := SaveTunnel(&TunnelInfo{Context: CostTunnelKey("staging"), Namespace: "ate-cost", Service: "cost", Port: port}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := EnsureFinOpsURL(Options{Context: "staging"})
+	got, err := EnsureCostURL(Options{Context: "staging"})
 	if err != nil || got != "http://127.0.0.1:"+strconv.Itoa(port) {
-		t.Errorf("EnsureFinOpsURL(staging) = %q, %v; want the saved tunnel", got, err)
+		t.Errorf("EnsureCostURL(staging) = %q, %v; want the saved tunnel", got, err)
 	}
 	// prod has no saved tunnel; the healthy staging port must not be used.
-	if got, err := EnsureFinOpsURL(Options{Context: "prod"}); err == nil {
-		t.Errorf("EnsureFinOpsURL(prod) = %q, want an error (no tunnel for prod and no kubectl)", got)
+	if got, err := EnsureCostURL(Options{Context: "prod"}); err == nil {
+		t.Errorf("EnsureCostURL(prod) = %q, want an error (no tunnel for prod and no kubectl)", got)
 	}
-	if got, _ := EnsureFinOpsURL(Options{Context: "prod", ServerURL: "http://explicit:1"}); got != "http://explicit:1" {
+	if got, _ := EnsureCostURL(Options{Context: "prod", ServerURL: "http://explicit:1"}); got != "http://explicit:1" {
 		t.Errorf("explicit server = %q", got)
 	}
 }

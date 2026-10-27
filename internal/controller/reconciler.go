@@ -28,10 +28,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+	"github.com/google/ax/internal/budget"
 	"github.com/google/ax/internal/model"
 	"github.com/google/ax/internal/substrate"
 	"github.com/google/ax/pkg/apis/v1alpha1"
+	"go.ate.dev/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -76,6 +77,11 @@ type TaskReconciler struct {
 	// DefaultLimits is the sandbox size of a task that sets neither
 	// spec.resources.limits nor spec.resources.requests.
 	DefaultLimits substrate.Limits
+
+	// Tasks reads a task from the store, to find the task that owns the
+	// budget of a task tree. Nil limits budget labels to the task's own
+	// spec.budget.
+	Tasks budget.Lookup
 }
 
 // Default sandbox size, used when ax-server is not given another.
@@ -230,7 +236,8 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, wor
 		}
 	}
 
-	actor, err := r.client.EnsureActor(ctx, atespace, actorName, templateAtespace, templateName)
+	actorLabels := budget.Resolve(ctx, r.Tasks, task)
+	actor, err := r.client.EnsureActorWithLabels(ctx, atespace, actorName, templateAtespace, templateName, actorLabels.Set)
 	if err != nil {
 		if substrate.IsTransientError(err) {
 			r.setNotReady(task, "SubstrateUnavailable", err.Error(), now)
@@ -244,6 +251,8 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, wor
 	if uid := actor.GetMetadata().GetUid(); uid != "" {
 		task.Status.ActorUid = uid
 	}
+	actor = r.applyBudgetLabels(ctx, task, actor, actorLabels, now)
+	task.Status.Holds = substrate.Holds(actor)
 
 	// 4. Suspend or Resume the Actor
 	// Tasks are suspended by default upon creation until explicitly resumed to "Running".
@@ -263,6 +272,17 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, wor
 	slog.Info("resuming actor on Substrate worker", "actor", actorName)
 	_, workerIP, err := r.client.ResumeActor(ctx, atespace, actorName)
 	if err != nil {
+		if held, ok := substrate.AsHeld(err); ok {
+			// A hold is not a failure: the task keeps its state and resumes
+			// once the hold's owner removes it.
+			task.Status.WorkerIp = ""
+			task.Status.Phase = "Suspended"
+			r.setNotReady(task, condReasonHeld, held.Error(), now)
+			if a, getErr := r.client.GetActor(ctx, atespace, actorName); getErr == nil {
+				task.Status.Holds = substrate.Holds(a)
+			}
+			return task, held
+		}
 		if substrate.IsTransientError(err) {
 			r.setNotReady(task, "SubstrateUnavailable", err.Error(), now)
 			task.Status.Phase = "Pending"
@@ -367,7 +387,125 @@ const (
 	condReady = "Ready"
 	// condWorkspaceReady reports whether the workspace inside the actor has finished setting up.
 	condWorkspaceReady = "WorkspaceReady"
+	// condBudgetLabels reports whether the actor carries the budget labels of
+	// the budget that covers the task. It is added only after a failed sync.
+	condBudgetLabels = "BudgetLabelsSynced"
+	// condReasonHeld is the Ready reason of a task whose actor has a hold.
+	condReasonHeld = "Held"
 )
+
+// applyBudgetLabels brings the actor's agent-cost/budget-* labels to want and
+// records the budget group on the task. It returns the updated actor, or
+// actor unchanged when nothing changed or the sync failed. A failed sync does
+// not fail the task: the next reconcile retries it.
+func (r *TaskReconciler) applyBudgetLabels(ctx context.Context, task *v1alpha1.Task, actor *ateapipb.Actor, want budget.Labels, now time.Time) *ateapipb.Actor {
+	task.Status.BudgetGroup = want.Group(task.GetMetadata().GetAtespace())
+	set, del := want.Diff(actor.GetLabels())
+	if set == nil && del == nil {
+		if r.hasCondition(task, condBudgetLabels) {
+			r.setCondition(task, condBudgetLabels, "True", "Synced", "Actor budget labels are up to date", now)
+		}
+		return actor
+	}
+	atespace, name := task.GetMetadata().GetAtespace(), task.GetStatus().GetActor()
+	updated, err := r.client.SetActorLabels(ctx, atespace, name, set, del)
+	if err != nil {
+		slog.Warn("could not sync actor budget labels", "actor", atespace+"/"+name, "error", err)
+		r.setCondition(task, condBudgetLabels, "False", "SyncFailed", err.Error(), now)
+		return actor
+	}
+	slog.Info("synced actor budget labels", "actor", atespace+"/"+name, "set", set, "deleted", del)
+	if r.hasCondition(task, condBudgetLabels) {
+		r.setCondition(task, condBudgetLabels, "True", "Synced", "Actor budget labels are up to date", now)
+	}
+	if updated == nil {
+		return actor
+	}
+	return updated
+}
+
+// SyncBudgetLabels brings the budget labels of the task's existing actor up
+// to date, and refreshes the task's holds. It does not create, suspend, or
+// resume the actor. A task with no actor yet is returned unchanged.
+func (r *TaskReconciler) SyncBudgetLabels(ctx context.Context, task *v1alpha1.Task) (*v1alpha1.Task, error) {
+	if task.Status == nil {
+		task.Status = &v1alpha1.TaskStatus{}
+	}
+	atespace := task.GetMetadata().GetAtespace()
+	if atespace == "" {
+		atespace = "default"
+	}
+	name := task.GetMetadata().GetName()
+	actor, err := r.client.GetActor(ctx, atespace, name)
+	if status.Code(err) == codes.NotFound {
+		return task, nil
+	}
+	if err != nil {
+		return task, fmt.Errorf("reading actor %s/%s: %w", atespace, name, err)
+	}
+	task.Status.Actor = name
+	want := budget.Resolve(ctx, r.Tasks, task)
+	actor = r.applyBudgetLabels(ctx, task, actor, want, time.Now())
+	task.Status.Holds = substrate.Holds(actor)
+	return task, nil
+}
+
+// RefreshActorState sets status.holds and status.budgetGroup on each task
+// from its actor in Substrate. It reads one actor with GetActor, and more
+// with one ListActors call per atespace. It is best effort: a task whose
+// actor cannot be read keeps its stored state.
+func (r *TaskReconciler) RefreshActorState(ctx context.Context, tasks []*v1alpha1.Task) {
+	atespaceOf := func(t *v1alpha1.Task) string {
+		if a := t.GetMetadata().GetAtespace(); a != "" {
+			return a
+		}
+		return "default"
+	}
+	apply := func(t *v1alpha1.Task, a *ateapipb.Actor) {
+		if t.Status == nil {
+			t.Status = &v1alpha1.TaskStatus{}
+		}
+		t.Status.Holds = substrate.Holds(a)
+		t.Status.BudgetGroup = budget.GroupID(atespaceOf(t), a.GetLabels()[budget.LabelGroup])
+	}
+	if len(tasks) == 1 {
+		t := tasks[0]
+		if a, err := r.client.GetActor(ctx, atespaceOf(t), t.GetMetadata().GetName()); err == nil {
+			apply(t, a)
+		}
+		return
+	}
+	byAtespace := map[string][]*v1alpha1.Task{}
+	for _, t := range tasks {
+		byAtespace[atespaceOf(t)] = append(byAtespace[atespaceOf(t)], t)
+	}
+	for atespace, ts := range byAtespace {
+		actors, err := r.client.ListActors(ctx, atespace)
+		if err != nil {
+			slog.Debug("could not list actors to refresh task holds", "atespace", atespace, "error", err)
+			continue
+		}
+		byName := make(map[string]*ateapipb.Actor, len(actors))
+		for _, a := range actors {
+			byName[a.GetMetadata().GetName()] = a
+		}
+		for _, t := range ts {
+			if a, ok := byName[t.GetMetadata().GetName()]; ok {
+				apply(t, a)
+			}
+		}
+	}
+}
+
+// hasCondition reports whether the task has the given condition type.
+func (r *TaskReconciler) hasCondition(task *v1alpha1.Task, condType string) bool {
+	for _, c := range task.GetStatus().GetConditions() {
+		if c.Type == condType {
+			return true
+		}
+	}
+	return false
+}
 
 // setNotReady marks the task's Ready condition False. WorkspaceReady is left untouched:
 // workspace setup is a one-time step whose result outlives actor failures and suspends.

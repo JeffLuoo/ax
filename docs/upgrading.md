@@ -9,7 +9,7 @@ This page lists the defaults that this version of `ax-server` changes, and what 
 The effect on new tasks:
 
 - A worker can hold fewer tasks if its earlier tasks were smaller than 1 vCPU and 2 GiB.
-- Agent FinOps prices a sandbox by the size that it books. A larger booking costs more, also when the agent does not use it.
+- The Cost Service prices a sandbox by the size that it books. A larger booking costs more, also when the agent does not use it.
 - To keep the earlier size, set `spec.resources` in each task, or set `--default-task-cpu` and `--default-task-memory`.
 
 ## Template name
@@ -43,3 +43,13 @@ When `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` is set,
 ## Access control
 
 `ax-server` now checks each caller with a Kubernetes TokenReview and a SubjectAccessReview (`--auth`, default `true`). Give your users RBAC rules for the `ax.io` resources before you upgrade, or they cannot use `ax`. See [Access control](concepts.md#access-control).
+
+## Budgets and holds
+
+`ax-server` now labels each task's actor with the budget that covers it, and reads the actor's holds. It needs an Agent Substrate with actor labels and holds (`SetActorLabels`, `Actor.labels`, `ActorStatus.holds`).
+
+- A task with `spec.budget.maxUsd` and scope `Tree` (the default) is a budget group. Its actor and every actor under it through `spec.parent` get `agent-cost/budget-group: <task>` (the Cost Service keys the group as `group:<atespace>/<task>`); its own actor also gets `agent-cost/budget-limit-usd` and, when `warnAt` is set, `agent-cost/warn-at`. A `Task` scope covers only that task's actor. The outermost Tree budget wins when budgets nest.
+- Substrate must let `ax-server`'s identity manage the `agent-cost/budget-*` label prefix. If `SetActorLabels` fails, the task still runs; it gets a `BudgetLabelsSynced=False` condition, and the next reconcile retries.
+- `ax budget set <task> --max-usd N` (the new `UpdateTaskBudget` RPC, verb `update` on `tasks`) changes a budget after create and syncs the labels of the whole subtree. The Cost Service sees a raised limit and removes its `agent-cost/budget` holds.
+- `GetTask` and `ListTasks` read holds from Substrate on each call and return them in `status.holds`. A resume of a held task fails with `FailedPrecondition`, and the task stays `Suspended` with `Ready=False`, reason `Held`.
+- The Cost Service is now `cost.ate-cost.svc`. `ax cost` port-forwards to `svc/cost:9090` in namespace `ate-cost` (`--cost-server`, `--cost-namespace`, `$AX_COST_SERVER`). The old `--finops-*` flags and `$AX_FINOPS_*` variables still work.

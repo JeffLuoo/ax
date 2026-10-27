@@ -356,6 +356,29 @@ func validateResources(r *ResourcesSpec) error {
 	return nil
 }
 
+// Budget scopes. An empty scope means BudgetScopeTree.
+const (
+	BudgetScopeTree = "Tree"
+	BudgetScopeTask = "Task"
+)
+
+// ValidateBudget checks a task budget. A nil budget is valid and means no
+// limit.
+func ValidateBudget(b *Budget) error {
+	if v := b.GetMaxUsd(); math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return fmt.Errorf("spec.budget.maxUsd: invalid value %v: must be a finite number of at least 0", v)
+	}
+	if w := b.GetWarnAt(); math.IsNaN(w) || w < 0 || w >= 1 {
+		return fmt.Errorf("spec.budget.warnAt: invalid value %v: must be at least 0 and less than 1", w)
+	}
+	switch b.GetScope() {
+	case "", BudgetScopeTree, BudgetScopeTask:
+	default:
+		return fmt.Errorf("spec.budget.scope: invalid value %q: must be %q or %q", b.GetScope(), BudgetScopeTree, BudgetScopeTask)
+	}
+	return nil
+}
+
 // ValidateTask reports the first problem with a task that would make it
 // impossible to run correctly. It is called by the API server before saving.
 // It does not check that a parent task exists; the API server does.
@@ -375,8 +398,8 @@ func ValidateTask(t *Task) error {
 			return fmt.Errorf("spec.parent: a task cannot be its own parent")
 		}
 	}
-	if b := spec.GetBudget().GetMaxUsd(); math.IsNaN(b) || math.IsInf(b, 0) || b < 0 {
-		return fmt.Errorf("spec.budget.maxUsd: invalid value %v: must be a finite number of at least 0", b)
+	if err := ValidateBudget(spec.GetBudget()); err != nil {
+		return err
 	}
 	if err := validateResources(spec.GetResources()); err != nil {
 		return err

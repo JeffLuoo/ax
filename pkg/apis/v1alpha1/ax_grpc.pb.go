@@ -33,21 +33,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AX_GetTask_FullMethodName         = "/ax.v1alpha1.AX/GetTask"
-	AX_ListTasks_FullMethodName       = "/ax.v1alpha1.AX/ListTasks"
-	AX_CreateTask_FullMethodName      = "/ax.v1alpha1.AX/CreateTask"
-	AX_DeleteTask_FullMethodName      = "/ax.v1alpha1.AX/DeleteTask"
-	AX_SuspendTask_FullMethodName     = "/ax.v1alpha1.AX/SuspendTask"
-	AX_ResumeTask_FullMethodName      = "/ax.v1alpha1.AX/ResumeTask"
-	AX_WatchTask_FullMethodName       = "/ax.v1alpha1.AX/WatchTask"
-	AX_GetWorkspace_FullMethodName    = "/ax.v1alpha1.AX/GetWorkspace"
-	AX_ListWorkspaces_FullMethodName  = "/ax.v1alpha1.AX/ListWorkspaces"
-	AX_UpdateWorkspace_FullMethodName = "/ax.v1alpha1.AX/UpdateWorkspace"
-	AX_DeleteWorkspace_FullMethodName = "/ax.v1alpha1.AX/DeleteWorkspace"
-	AX_GetModel_FullMethodName        = "/ax.v1alpha1.AX/GetModel"
-	AX_ListModels_FullMethodName      = "/ax.v1alpha1.AX/ListModels"
-	AX_UpdateModel_FullMethodName     = "/ax.v1alpha1.AX/UpdateModel"
-	AX_DeleteModel_FullMethodName     = "/ax.v1alpha1.AX/DeleteModel"
+	AX_GetTask_FullMethodName          = "/ax.v1alpha1.AX/GetTask"
+	AX_ListTasks_FullMethodName        = "/ax.v1alpha1.AX/ListTasks"
+	AX_CreateTask_FullMethodName       = "/ax.v1alpha1.AX/CreateTask"
+	AX_DeleteTask_FullMethodName       = "/ax.v1alpha1.AX/DeleteTask"
+	AX_SuspendTask_FullMethodName      = "/ax.v1alpha1.AX/SuspendTask"
+	AX_ResumeTask_FullMethodName       = "/ax.v1alpha1.AX/ResumeTask"
+	AX_WatchTask_FullMethodName        = "/ax.v1alpha1.AX/WatchTask"
+	AX_UpdateTaskBudget_FullMethodName = "/ax.v1alpha1.AX/UpdateTaskBudget"
+	AX_GetWorkspace_FullMethodName     = "/ax.v1alpha1.AX/GetWorkspace"
+	AX_ListWorkspaces_FullMethodName   = "/ax.v1alpha1.AX/ListWorkspaces"
+	AX_UpdateWorkspace_FullMethodName  = "/ax.v1alpha1.AX/UpdateWorkspace"
+	AX_DeleteWorkspace_FullMethodName  = "/ax.v1alpha1.AX/DeleteWorkspace"
+	AX_GetModel_FullMethodName         = "/ax.v1alpha1.AX/GetModel"
+	AX_ListModels_FullMethodName       = "/ax.v1alpha1.AX/ListModels"
+	AX_UpdateModel_FullMethodName      = "/ax.v1alpha1.AX/UpdateModel"
+	AX_DeleteModel_FullMethodName      = "/ax.v1alpha1.AX/DeleteModel"
 )
 
 // AXClient is the client API for AX service.
@@ -64,6 +65,10 @@ type AXClient interface {
 	SuspendTask(ctx context.Context, in *SuspendTaskRequest, opts ...grpc.CallOption) (*Task, error)
 	ResumeTask(ctx context.Context, in *ResumeTaskRequest, opts ...grpc.CallOption) (*Task, error)
 	WatchTask(ctx context.Context, in *WatchTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchTaskResponse], error)
+	// UpdateTaskBudget replaces spec.budget, the only part of a task's spec
+	// that can change after create, and syncs the budget labels of the task's
+	// actor and of every actor under it.
+	UpdateTaskBudget(ctx context.Context, in *UpdateTaskBudgetRequest, opts ...grpc.CallOption) (*Task, error)
 	// Workspaces
 	GetWorkspace(ctx context.Context, in *GetWorkspaceRequest, opts ...grpc.CallOption) (*Workspace, error)
 	ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error)
@@ -163,6 +168,16 @@ func (c *aXClient) WatchTask(ctx context.Context, in *WatchTaskRequest, opts ...
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AX_WatchTaskClient = grpc.ServerStreamingClient[WatchTaskResponse]
 
+func (c *aXClient) UpdateTaskBudget(ctx context.Context, in *UpdateTaskBudgetRequest, opts ...grpc.CallOption) (*Task, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Task)
+	err := c.cc.Invoke(ctx, AX_UpdateTaskBudget_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aXClient) GetWorkspace(ctx context.Context, in *GetWorkspaceRequest, opts ...grpc.CallOption) (*Workspace, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Workspace)
@@ -257,6 +272,10 @@ type AXServer interface {
 	SuspendTask(context.Context, *SuspendTaskRequest) (*Task, error)
 	ResumeTask(context.Context, *ResumeTaskRequest) (*Task, error)
 	WatchTask(*WatchTaskRequest, grpc.ServerStreamingServer[WatchTaskResponse]) error
+	// UpdateTaskBudget replaces spec.budget, the only part of a task's spec
+	// that can change after create, and syncs the budget labels of the task's
+	// actor and of every actor under it.
+	UpdateTaskBudget(context.Context, *UpdateTaskBudgetRequest) (*Task, error)
 	// Workspaces
 	GetWorkspace(context.Context, *GetWorkspaceRequest) (*Workspace, error)
 	ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error)
@@ -297,6 +316,9 @@ func (UnimplementedAXServer) ResumeTask(context.Context, *ResumeTaskRequest) (*T
 }
 func (UnimplementedAXServer) WatchTask(*WatchTaskRequest, grpc.ServerStreamingServer[WatchTaskResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchTask not implemented")
+}
+func (UnimplementedAXServer) UpdateTaskBudget(context.Context, *UpdateTaskBudgetRequest) (*Task, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateTaskBudget not implemented")
 }
 func (UnimplementedAXServer) GetWorkspace(context.Context, *GetWorkspaceRequest) (*Workspace, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkspace not implemented")
@@ -461,6 +483,24 @@ func _AX_WatchTask_Handler(srv interface{}, stream grpc.ServerStream) error {
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AX_WatchTaskServer = grpc.ServerStreamingServer[WatchTaskResponse]
+
+func _AX_UpdateTaskBudget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTaskBudgetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AXServer).UpdateTaskBudget(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AX_UpdateTaskBudget_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AXServer).UpdateTaskBudget(ctx, req.(*UpdateTaskBudgetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
 
 func _AX_GetWorkspace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetWorkspaceRequest)
@@ -636,6 +676,10 @@ var AX_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResumeTask",
 			Handler:    _AX_ResumeTask_Handler,
+		},
+		{
+			MethodName: "UpdateTaskBudget",
+			Handler:    _AX_UpdateTaskBudget_Handler,
 		},
 		{
 			MethodName: "GetWorkspace",

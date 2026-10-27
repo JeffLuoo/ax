@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/google/ax/pkg/apis/v1alpha1"
+	"go.ate.dev/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -566,7 +566,7 @@ func TestClient_EnsureActorTemplateWithImage_InheritsBaseAndWaitsGolden(t *testi
 }
 
 func TestClient_EnsureActor_DefaultEgressPolicy(t *testing.T) {
-	t.Setenv("AX_DEFAULT_EGRESS_HOSTS", "mock-e2e.ate-finops.svc.cluster.local, *.ate-finops.svc.cluster.local")
+	t.Setenv("AX_DEFAULT_EGRESS_HOSTS", "mock-e2e.ate-cost.svc.cluster.local, *.ate-cost.svc.cluster.local")
 	mock := &mockControlClient{}
 	c := &Client{control: mock}
 

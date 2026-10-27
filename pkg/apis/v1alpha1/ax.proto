@@ -34,6 +34,10 @@ service AX {
   rpc SuspendTask(SuspendTaskRequest) returns (Task);
   rpc ResumeTask(ResumeTaskRequest) returns (Task);
   rpc WatchTask(WatchTaskRequest) returns (stream WatchTaskResponse);
+  // UpdateTaskBudget replaces spec.budget, the only part of a task's spec
+  // that can change after create, and syncs the budget labels of the task's
+  // actor and of every actor under it.
+  rpc UpdateTaskBudget(UpdateTaskBudgetRequest) returns (Task);
 
 
   // Workspaces
@@ -86,11 +90,19 @@ message TaskSpec {
   Budget budget = 8;
 }
 
-// Budget is a task's spending limit.
+// Budget is a task's spending limit. Ax enforces nothing itself: it labels
+// the actors, and the Cost Service tracks spend and holds them.
 message Budget {
   // max_usd is the most that the task can spend, in US dollars, on model
   // tokens and compute together. 0 means no limit.
   double max_usd = 1;
+  // warn_at is the fraction of max_usd at which the budget turns WARN,
+  // greater than 0 and less than 1. 0 means the Cost Service default.
+  double warn_at = 2;
+  // scope is "Tree" (the default when empty) or "Task". A Tree budget
+  // covers the task and every task under it through spec.parent; a Task
+  // budget covers only this task's actor.
+  string scope = 3;
 }
 
 message EnvVar {
@@ -142,6 +154,23 @@ message TaskStatus {
   // differs between an actor and a later one made under the same name, so
   // downstream cost joins key on it.
   string actor_uid = 13;
+  // holds are the holds on the task's actor in Substrate, read live by
+  // GetTask and ListTasks. Any hold keeps the actor suspended, and it cannot
+  // resume until every hold is removed.
+  repeated ActorHold holds = 14;
+  // budget_group is the agent-cost/budget-group label that Ax sets on the
+  // task's actor: <atespace>/<task that owns the budget>. Empty when no
+  // budget covers the task.
+  string budget_group = 15;
+}
+
+// ActorHold is a named hold on an actor, set by a controller such as the
+// Cost Service (agent-cost/budget).
+message ActorHold {
+  string name = 1;
+  string reason = 2;
+  string created_by = 3;
+  google.protobuf.Timestamp created_at = 4;
 }
 
 message Condition {
@@ -276,6 +305,13 @@ message ResumeTaskRequest {
 message WatchTaskRequest {
   string atespace = 1;
   string name = 2;
+}
+
+message UpdateTaskBudgetRequest {
+  string atespace = 1;
+  string name = 2;
+  // budget replaces spec.budget. Unset or max_usd 0 removes the limit.
+  Budget budget = 3;
 }
 
 message WatchTaskResponse {

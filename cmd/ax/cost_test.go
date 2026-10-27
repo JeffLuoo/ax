@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/ax/internal/finops"
+	"github.com/google/ax/internal/costapi"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store/memory"
 	"github.com/google/ax/pkg/apis/v1alpha1"
@@ -99,18 +99,18 @@ func TestParseCostArgs(t *testing.T) {
 	}
 }
 
-func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
+func newTestCostHTTPServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/costs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		writeCostReport(w, r, finops.CostReport{
+		writeCostReport(w, r, costapi.CostReport{
 			Since:       "2026-10-17T00:00:00Z",
 			GeneratedAt: "2026-10-17T01:00:00Z",
-			Totals:      finops.Totals{Calls: 2, InputTokens: 2800, OutputTokens: 600, Cost: finops.MoneyMap{"USD": 0.015525}},
-			Compute:     finops.ComputeSummary{Leases: 2, LeaseSeconds: 20, VCPUSeconds: 10, GiBSeconds: 20, Cost: finops.MoneyMap{"USD": 0.000171}},
-			TotalCost:   finops.MoneyMap{"USD": 0.016046},
-			Actors: []finops.ActorCost{
+			Totals:      costapi.Totals{Calls: 2, InputTokens: 2800, OutputTokens: 600, Cost: costapi.MoneyMap{"USD": 0.015525}},
+			Compute:     costapi.ComputeSummary{Leases: 2, LeaseSeconds: 20, VCPUSeconds: 10, GiBSeconds: 20, Cost: costapi.MoneyMap{"USD": 0.000171}},
+			TotalCost:   costapi.MoneyMap{"USD": 0.016046},
+			Actors: []costapi.ActorCost{
 				{
 					Atespace:              "otel-bench",
 					Name:                  "coding-parent-1",
@@ -124,14 +124,14 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 					OutputTokens:          400,
 					CacheReadInputTokens:  500,
 					CacheWriteInputTokens: 250,
-					Cost:                  finops.MoneyMap{"USD": 0.013088},
-					Compute:               finops.ComputeSummary{Leases: 1, LeaseSeconds: 12, VCPUSeconds: 6, GiBSeconds: 12, Cost: finops.MoneyMap{"USD": 0.000103}, MeasuredCPUSeconds: 3.12},
-					TotalCost:             finops.MoneyMap{"USD": 0.013540},
-					MeasuredComputeCost:   finops.MoneyMap{"USD": 0.000042},
-					StorageCost:           finops.MoneyMap{"USD": 0.000350},
-					HostingCost:           finops.MoneyMap{"USD": 0.000453},
-					MeasuredHostingCost:   finops.MoneyMap{"USD": 0.000392},
-					Models: []finops.ModelCost{
+					Cost:                  costapi.MoneyMap{"USD": 0.013088},
+					Compute:               costapi.ComputeSummary{Leases: 1, LeaseSeconds: 12, VCPUSeconds: 6, GiBSeconds: 12, Cost: costapi.MoneyMap{"USD": 0.000103}, MeasuredCPUSeconds: 3.12},
+					TotalCost:             costapi.MoneyMap{"USD": 0.013540},
+					MeasuredComputeCost:   costapi.MoneyMap{"USD": 0.000042},
+					StorageCost:           costapi.MoneyMap{"USD": 0.000350},
+					HostingCost:           costapi.MoneyMap{"USD": 0.000453},
+					MeasuredHostingCost:   costapi.MoneyMap{"USD": 0.000392},
+					Models: []costapi.ModelCost{
 						{
 							Provider:              "anthropic",
 							Model:                 "claude-sonnet-4-5",
@@ -140,7 +140,7 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 							OutputTokens:          400,
 							CacheReadInputTokens:  500,
 							CacheWriteInputTokens: 250,
-							Cost:                  finops.MoneyMap{"USD": 0.013088},
+							Cost:                  costapi.MoneyMap{"USD": 0.013088},
 						},
 					},
 				},
@@ -155,13 +155,13 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 					Calls:        1,
 					InputTokens:  800,
 					OutputTokens: 200,
-					Cost:         finops.MoneyMap{"USD": 0.002438},
-					Compute:      finops.ComputeSummary{Leases: 1, LeaseSeconds: 8, VCPUSeconds: 4, GiBSeconds: 8, Cost: finops.MoneyMap{"USD": 0.000068}},
-					TotalCost:    finops.MoneyMap{"USD": 0.002856},
-					HostingCost:  finops.MoneyMap{"USD": 0.000068},
+					Cost:         costapi.MoneyMap{"USD": 0.002438},
+					Compute:      costapi.ComputeSummary{Leases: 1, LeaseSeconds: 8, VCPUSeconds: 4, GiBSeconds: 8, Cost: costapi.MoneyMap{"USD": 0.000068}},
+					TotalCost:    costapi.MoneyMap{"USD": 0.002856},
+					HostingCost:  costapi.MoneyMap{"USD": 0.000068},
 				},
 			},
-			Sessions: []finops.SessionCost{
+			Sessions: []costapi.SessionCost{
 				{
 					SessionID:     "conv-e2e-demo-1",
 					FromHeader:    true,
@@ -174,26 +174,26 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 					OutputTokens:  400,
 					ActiveSeconds: 12,
 					ActiveShare:   1.0,
-					LLMCost:       finops.MoneyMap{"USD": 0.013088},
-					ComputeCost:   finops.MoneyMap{"USD": 0.000103},
-					TotalCost:     finops.MoneyMap{"USD": 0.013191},
+					LLMCost:       costapi.MoneyMap{"USD": 0.013088},
+					ComputeCost:   costapi.MoneyMap{"USD": 0.000103},
+					TotalCost:     costapi.MoneyMap{"USD": 0.013191},
 				},
 			},
 		})
 	})
 	mux.HandleFunc("/v1/costs/curve", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(finops.CurveReport{
+		_ = json.NewEncoder(w).Encode(costapi.CurveReport{
 			TargetUSD:          1.0,
 			StoragePerAgentUSD: 0.0115,
-			Tiers: []finops.TierCurve{
+			Tiers: []costapi.TierCurve{
 				{
 					Tier:           "on-demand",
 					PerActiveHour:  0.015393,
 					Fixed:          0.0115,
 					BreakEvenHours: 64.2175,
 					AlwaysOn:       11.2484,
-					Points: []finops.CurvePoint{
+					Points: []costapi.CurvePoint{
 						{ActiveHours: 10, ActiveCost: 0.1654, UnderTarget: true},
 						{ActiveHours: 15, ActiveCost: 0.2424, UnderTarget: true},
 					},
@@ -208,16 +208,16 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(finops.FocusReport{
-			Kind:              finops.FocusReportKind,
+		_ = json.NewEncoder(w).Encode(costapi.FocusReport{
+			Kind:              costapi.FocusReportKind,
 			ChargePeriodStart: "2026-10-16T12:00:00Z",
 			ChargePeriodEnd:   "2026-10-16T14:00:00Z",
-			AllocationKeys: []finops.AllocationKey{{
+			AllocationKeys: []costapi.AllocationKey{{
 				ServiceName:       "Kubernetes Engine",
 				ResourceID:        "gke-worker-pool/otel-bench/pool-1",
 				AllocatedMethodID: "booked-share",
-				AllocatedMethodDetails: finops.FocusMethodDetails{Elements: []finops.FocusElement{
-					{UsageQuantity: 0.0033, UsageUnit: finops.UnitSlotHours},
+				AllocatedMethodDetails: costapi.FocusMethodDetails{Elements: []costapi.FocusElement{
+					{UsageQuantity: 0.0033, UsageUnit: costapi.UnitSlotHours},
 				}},
 				AllocatedResourceID:   "f45d4ab9-7dd2-4e78-b8bc-59d6ff76cd29",
 				AllocatedResourceName: "otel-bench/coding-parent-1",
@@ -230,12 +230,12 @@ func newTestFinOpsHTTPServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// writeCostReport serves report the way finops does: filtered to the
+// writeCostReport serves report the way the Cost Service does: filtered to the
 // ?atespace= in the request, with fields that the CLI's structs do not have.
-func writeCostReport(w http.ResponseWriter, r *http.Request, report finops.CostReport) {
+func writeCostReport(w http.ResponseWriter, r *http.Request, report costapi.CostReport) {
 	if scope := r.URL.Query().Get("atespace"); scope != "" {
 		report.Atespace = scope
-		var rows []finops.ActorCost
+		var rows []costapi.ActorCost
 		for _, a := range report.Actors {
 			if a.Atespace == scope {
 				rows = append(rows, a)
@@ -272,7 +272,7 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 }
 
 func TestRunCostCommands(t *testing.T) {
-	finopsSrv := newTestFinOpsHTTPServer(t)
+	costSrv := newTestCostHTTPServer(t)
 
 	// Start an in-memory AX gRPC server with coding-parent-1 and coding-sub-1.
 	s := memory.NewStore()
@@ -299,7 +299,7 @@ func TestRunCostCommands(t *testing.T) {
 
 	t.Run("list table joined with ax-server", func(t *testing.T) {
 		out, err := captureStdout(t, func() error {
-			return runCost(finopsSrv.URL, listener.Addr().String(), "otel-bench", true, nil)
+			return runCost(costSrv.URL, listener.Addr().String(), "otel-bench", true, nil)
 		})
 		if err != nil {
 			t.Fatalf("runCost list failed: %v", err)
@@ -313,7 +313,7 @@ func TestRunCostCommands(t *testing.T) {
 
 	t.Run("task detail report", func(t *testing.T) {
 		out, err := captureStdout(t, func() error {
-			return runCost(finopsSrv.URL, listener.Addr().String(), "otel-bench", true, []string{"task", "coding-parent-1"})
+			return runCost(costSrv.URL, listener.Addr().String(), "otel-bench", true, []string{"task", "coding-parent-1"})
 		})
 		if err != nil {
 			t.Fatalf("runCost task detail failed: %v", err)
@@ -335,7 +335,7 @@ func TestRunCostCommands(t *testing.T) {
 
 	t.Run("curve report", func(t *testing.T) {
 		out, err := captureStdout(t, func() error {
-			return runCost(finopsSrv.URL, "", "default", false, []string{"curve"})
+			return runCost(costSrv.URL, "", "default", false, []string{"curve"})
 		})
 		if err != nil {
 			t.Fatalf("runCost curve failed: %v", err)
@@ -349,7 +349,7 @@ func TestRunCostCommands(t *testing.T) {
 
 	t.Run("focus table and csv", func(t *testing.T) {
 		out, err := captureStdout(t, func() error {
-			return runCost(finopsSrv.URL, "", "default", false, []string{"focus"})
+			return runCost(costSrv.URL, "", "default", false, []string{"focus"})
 		})
 		if err != nil {
 			t.Fatalf("runCost focus failed: %v", err)
@@ -361,7 +361,7 @@ func TestRunCostCommands(t *testing.T) {
 		}
 
 		csvOut, err := captureStdout(t, func() error {
-			return runCost(finopsSrv.URL, "", "default", false, []string{"focus", "-o", "csv"})
+			return runCost(costSrv.URL, "", "default", false, []string{"focus", "-o", "csv"})
 		})
 		if err != nil {
 			t.Fatalf("runCost focus csv failed: %v", err)
@@ -373,10 +373,10 @@ func TestRunCostCommands(t *testing.T) {
 }
 
 func TestLocalTaskTreeRollup(t *testing.T) {
-	// FinOps reports only per-actor costs (no parentAgentId, subAgents, or treeTotalCost).
+	// The Cost Service reports only per-actor costs (no parentAgentId, subAgents, or treeTotalCost).
 	// Also put bogus treeTotalCost=99.0 and parentAgentId="bogus" on rows to prove
-	// the CLI ignores FinOps' tree fields and computes rollups from Ax tasks alone.
-	finopsBody := `{
+	// the CLI ignores the Cost Service's tree fields and computes rollups from Ax tasks alone.
+	costBody := `{
   "costBasis": "estimated",
   "atespace": "team-a",
   "totals": {"calls": 3, "cost": {"USD": 0.35}},
@@ -447,10 +447,10 @@ func TestLocalTaskTreeRollup(t *testing.T) {
     }
   ]
 }`
-	srv := rawServer(t, map[string]string{"/v1/costs": finopsBody})
+	srv := rawServer(t, map[string]string{"/v1/costs": costBody})
 
 	// Task tree in ax-server:
-	// - root (id: id-root-v2) -> mid-unpriced (id: id-mid, parent_id: id-root-v2, NO FinOps actor)
+	// - root (id: id-root-v2) -> mid-unpriced (id: id-mid, parent_id: id-root-v2, NO Cost Service actor)
 	//   -> grandchild (id: id-gc, parent_id: id-mid)
 	// - stale-child has spec.parent="root" but status.parent_id="id-root-v1" (recreated parent guard!)
 	// - other-child is in team-b with spec.parent="root" and parent_id="id-root-v2" (same-atespace guard!)
@@ -526,14 +526,14 @@ func TestLocalTaskTreeRollup(t *testing.T) {
 	}
 
 	// 2. `ax cost task mid-unpriced`:
-	// mid-unpriced has NO FinOps actor record, but exists in ax-server and has
-	// child `grandchild` ($0.24) in FinOps. It falls back gracefully to $0 own
+	// mid-unpriced has NO Cost Service actor record, but exists in ax-server and has
+	// child `grandchild` ($0.24) in the Cost Service. It falls back gracefully to $0 own
 	// cost and $0.24 tree cost.
 	out, err = captureStdout(t, func() error {
 		return runCost(srv.URL, ax, "team-a", true, []string{"task", "mid-unpriced"})
 	})
 	if err != nil {
-		t.Fatalf("ax cost task mid-unpriced (missing FinOps actor) failed: %v", err)
+		t.Fatalf("ax cost task mid-unpriced (missing Cost Service actor) failed: %v", err)
 	}
 	for _, want := range []string{
 		"Name:               mid-unpriced",
@@ -567,7 +567,7 @@ func TestLocalTaskTreeRollup(t *testing.T) {
 	}
 
 	// 4. `ax cost -a team-a -o wide` list table shows local sub-agent count (2) and tree total ($0.360000) for root,
-	// and ignores FinOps' bogus 99 subAgents / $99.000000 treeTotalCost.
+	// and ignores the Cost Service's bogus 99 subAgents / $99.000000 treeTotalCost.
 	out, err = captureStdout(t, func() error {
 		return runCost(srv.URL, ax, "team-a", true, []string{"-o", "wide"})
 	})
@@ -579,7 +579,7 @@ func TestLocalTaskTreeRollup(t *testing.T) {
 	}
 
 	// 5. `ax describe task` (via tryPrintTaskDescribeCost) computes local tree rollup,
-	// including when the described parent task (`mid-unpriced`) has no FinOps actor of its own.
+	// including when the described parent task (`mid-unpriced`) has no Cost Service actor of its own.
 	taskMap := map[string]*v1alpha1.Task{}
 	for _, tk := range tasks {
 		if tk.GetMetadata().GetAtespace() == "team-a" {

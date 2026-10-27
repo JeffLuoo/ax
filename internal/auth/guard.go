@@ -57,6 +57,9 @@ var Rules = map[string]Rule{
 	v1alpha1.AX_SuspendTask_FullMethodName: {"update", "tasks", func(r any) string { return orDefault(r.(*v1alpha1.SuspendTaskRequest).GetAtespace()) }},
 	v1alpha1.AX_ResumeTask_FullMethodName:  {"update", "tasks", func(r any) string { return orDefault(r.(*v1alpha1.ResumeTaskRequest).GetAtespace()) }},
 	v1alpha1.AX_WatchTask_FullMethodName:   {"watch", "tasks", func(r any) string { return orDefault(r.(*v1alpha1.WatchTaskRequest).GetAtespace()) }},
+	v1alpha1.AX_UpdateTaskBudget_FullMethodName: {"update", "tasks", func(r any) string {
+		return orDefault(r.(*v1alpha1.UpdateTaskBudgetRequest).GetAtespace())
+	}},
 
 	v1alpha1.AX_GetWorkspace_FullMethodName:   {"get", "workspaces", func(r any) string { return orDefault(r.(*v1alpha1.GetWorkspaceRequest).GetAtespace()) }},
 	v1alpha1.AX_ListWorkspaces_FullMethodName: {"list", "workspaces", func(r any) string { return r.(*v1alpha1.ListWorkspacesRequest).GetAtespace() }},

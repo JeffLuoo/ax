@@ -28,7 +28,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/google/ax/internal/finops"
+	"github.com/google/ax/internal/costapi"
 	"github.com/google/ax/internal/tunnel"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -41,17 +41,19 @@ const costUsage = `Usage:
   ax cost actor <name> [-a <atespace>] [-o table|json|yaml]
   ax cost curve [-o table|json|yaml]
   ax cost focus [-o table|json|csv|yaml]
+  ax cost budgets [-a <atespace>] [-o table|json|yaml]
 
-Query Agent FinOps cost attribution, active hosting cost breakdown
+Query Cost Service attribution, active hosting cost breakdown
 (booked-share vs. measured-usage), per-session spend, task budgets and
-outcomes, the < $1/agent-month hosting sensitivity curve, and FOCUS 1.3
+outcomes, the < $1/agent-month hosting sensitivity curve, FOCUS 1.3
 allocation keys (usage per agent and origin resource; the holder of the bill
-writes the split cost rows).
+writes the split cost rows), and budget states (OK, WARN, EXHAUSTED) with the
+actors that the Cost Service holds.
 
 -a limits the query to one atespace, on the server; without -a, the default
 atespace is shown, or all atespaces when it is empty. A task or actor is a
 name, "<atespace>/<name>", an actor UID, or a unique UID prefix of at least
-8 characters. -o json and -o yaml print the FinOps server's response as it
+8 characters. -o json and -o yaml print the Cost Service's response as it
 came. Numbers from rate card prices are labeled ESTIMATE — NOT RECONCILED.
 
 Examples:
@@ -60,10 +62,11 @@ Examples:
   ax cost task coding-parent-1 -a otel-bench
   ax cost curve
   ax cost focus
-  ax cost focus -o csv`
+  ax cost focus -o csv
+  ax cost budgets`
 
 type costOptions struct {
-	subcmd       string // "list", "get", "curve", "focus"
+	subcmd       string // "list", "get", "curve", "focus", "budgets"
 	target       string // task/actor name or UID when subcmd == "get"
 	allAtespaces bool
 	output       string // "table", "wide", "json", "yaml", "csv"
@@ -117,6 +120,8 @@ func parseCostArgs(args []string) (costOptions, error) {
 		opts.subcmd = "curve"
 	case "focus":
 		opts.subcmd = "focus"
+	case "budgets", "budget":
+		opts.subcmd = "budgets"
 	case "tasks", "actors":
 		if len(positional) >= 2 {
 			opts.subcmd = "get"
@@ -138,11 +143,11 @@ func parseCostArgs(args []string) (costOptions, error) {
 	return opts, nil
 }
 
-// runCost executes `ax cost ...` against the FinOps HTTP server and joins task
+// runCost executes `ax cost ...` against the Cost Service HTTP API and joins task
 // phases, budgets, and outcomes from the AX server when axServerURL is set.
 // atespaceExplicit is true when the user passed -a; then nothing outside that
 // atespace is shown or matched.
-func runCost(finopsURL, axServerURL, atespace string, atespaceExplicit bool, args []string) error {
+func runCost(costURL, axServerURL, atespace string, atespaceExplicit bool, args []string) error {
 	opts, err := parseCostArgs(args)
 	if err != nil {
 		return err
@@ -153,7 +158,7 @@ func runCost(finopsURL, axServerURL, atespace string, atespaceExplicit bool, arg
 	}
 	out := os.Stdout
 
-	client := finops.NewClient(finopsURL, nil)
+	client := costapi.NewClient(costURL, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -190,12 +195,30 @@ func runCost(finopsURL, axServerURL, atespace string, atespaceExplicit bool, arg
 		}
 		return renderFocusReport(out, focus)
 
+	case "budgets":
+		scope := ""
+		if atespaceExplicit && !opts.allAtespaces {
+			scope = atespace
+		}
+		report, raw, err := client.GetBudgets(ctx, scope)
+		if err != nil {
+			return err
+		}
+		if isStructured(opts.output) {
+			return writeRaw(out, raw, opts.output)
+		}
+		return renderBudgets(out, report)
+
 	case "get":
 		m, task, err := resolveActorDetail(ctx, client, axServerURL, atespace, atespaceExplicit && !opts.allAtespaces, opts.target)
 		if err != nil {
 			return err
 		}
-		return renderActorDetail(out, m, task, opts.output)
+		var budgets *costapi.BudgetsReport
+		if !isStructured(opts.output) {
+			budgets = fetchBudgets(ctx, client, m.Actor.Atespace)
+		}
+		return renderActorDetail(out, m, task, opts.output, budgets)
 
 	default:
 		scope := ""
@@ -225,7 +248,7 @@ func isStructured(format string) bool { return format == "json" || format == "ya
 
 // lookupAXTasks opportunistically lists the AX tasks, keyed by
 // "<atespace>/<name>", when axServerURL is reachable. Errors are ignored so
-// that `ax cost` works on clusters that run Substrate and FinOps without
+// that `ax cost` works on clusters that run Substrate and the Cost Service without
 // ax-server.
 func lookupAXTasks(ctx context.Context, axServerURL, atespace string) map[string]*v1alpha1.Task {
 	if axServerURL == "" {
@@ -281,7 +304,7 @@ func taskKey(atespace, name string) string {
 	return firstNonEmpty(atespace, "default") + "/" + name
 }
 
-func addMoney(dst finops.MoneyMap, srcs ...finops.MoneyMap) {
+func addMoney(dst costapi.MoneyMap, srcs ...costapi.MoneyMap) {
 	for _, src := range srcs {
 		for k, v := range src {
 			dst[k] += v
@@ -289,11 +312,11 @@ func addMoney(dst finops.MoneyMap, srcs ...finops.MoneyMap) {
 	}
 }
 
-func roundMoney(m finops.MoneyMap) finops.MoneyMap {
+func roundMoney(m costapi.MoneyMap) costapi.MoneyMap {
 	if len(m) == 0 {
 		return nil
 	}
-	out := make(finops.MoneyMap, len(m))
+	out := make(costapi.MoneyMap, len(m))
 	for k, v := range m {
 		out[k] = math.Round(v*1e12) / 1e12
 	}
@@ -359,26 +382,26 @@ func taskDescendants(children map[string][]string, rootKey string) []string {
 }
 
 // rollupActorTree computes a's sub-agent count and tree totals from the Ax task
-// tree and per-actor FinOps costs, falling back to a zero ActorCost when FinOps
+// tree and per-actor Cost Service costs, falling back to a zero ActorCost when the Cost Service
 // lacks a cost record for a descendant task.
-func rollupActorTree(a *finops.ActorCost, isCanonical bool, actors []finops.ActorCost, rawActors []json.RawMessage, children map[string][]string) ([]finops.ActorCost, []json.RawMessage) {
+func rollupActorTree(a *costapi.ActorCost, isCanonical bool, actors []costapi.ActorCost, rawActors []json.RawMessage, children map[string][]string) ([]costapi.ActorCost, []json.RawMessage) {
 	if a == nil || a.Note != "" {
 		return nil, nil
 	}
-	llm := finops.MoneyMap{}
-	comp := finops.MoneyMap{}
-	tot := finops.MoneyMap{}
+	llm := costapi.MoneyMap{}
+	comp := costapi.MoneyMap{}
+	tot := costapi.MoneyMap{}
 	addMoney(llm, a.Cost)
 	addMoney(comp, a.Compute.Cost)
 	addMoney(tot, a.TotalCost)
 
-	var descActors []finops.ActorCost
+	var descActors []costapi.ActorCost
 	var descRaw []json.RawMessage
 	if isCanonical {
 		rootKey := taskKey(a.Atespace, a.Name)
 		for _, descKey := range taskDescendants(children, rootKey) {
 			ns, name, _ := strings.Cut(descKey, "/")
-			cIdx := finops.CanonicalActorIndex(actors, ns, name)
+			cIdx := costapi.CanonicalActorIndex(actors, ns, name)
 			if cIdx >= 0 {
 				ca := actors[cIdx]
 				addMoney(llm, ca.Cost)
@@ -391,7 +414,7 @@ func rollupActorTree(a *finops.ActorCost, isCanonical bool, actors []finops.Acto
 					descRaw = append(descRaw, b)
 				}
 			} else {
-				zero := finops.ActorCost{
+				zero := costapi.ActorCost{
 					Atespace: ns,
 					Name:     name,
 					Class:    "agent",
@@ -411,7 +434,7 @@ func rollupActorTree(a *finops.ActorCost, isCanonical bool, actors []finops.Acto
 	return descActors, descRaw
 }
 
-func applyReportTaskRollups(report *finops.CostReport, tasks map[string]*v1alpha1.Task) {
+func applyReportTaskRollups(report *costapi.CostReport, tasks map[string]*v1alpha1.Task) {
 	if report == nil {
 		return
 	}
@@ -421,13 +444,13 @@ func applyReportTaskRollups(report *finops.CostReport, tasks map[string]*v1alpha
 		if a.Note != "" {
 			continue
 		}
-		cIdx := finops.CanonicalActorIndex(report.Actors, a.Atespace, a.Name)
+		cIdx := costapi.CanonicalActorIndex(report.Actors, a.Atespace, a.Name)
 		isCanonical := i == cIdx || cIdx == -1
 		rollupActorTree(a, isCanonical, report.Actors, nil, children)
 	}
 }
 
-func resolveActorDetail(ctx context.Context, client *finops.Client, axServerURL, atespace string, atespaceExplicit bool, target string) (*finops.ActorMatch, *v1alpha1.Task, error) {
+func resolveActorDetail(ctx context.Context, client *costapi.Client, axServerURL, atespace string, atespaceExplicit bool, target string) (*costapi.ActorMatch, *v1alpha1.Task, error) {
 	m, err := client.GetActorCost(ctx, atespace, atespaceExplicit, target)
 	if err == nil {
 		tasks := lookupAXTasks(ctx, axServerURL, m.Actor.Atespace)
@@ -443,13 +466,13 @@ func resolveActorDetail(ctx context.Context, client *finops.Client, axServerURL,
 		return m, task, nil
 	}
 
-	var notFound *finops.NotFoundError
+	var notFound *costapi.NotFoundError
 	if !errors.As(err, &notFound) || axServerURL == "" {
 		return nil, nil, err
 	}
 
-	// FinOps lacks a record for this actor; fall back to the task in ax-server
-	// when it exists, with $0 own cost and any descendants' FinOps costs.
+	// The Cost Service lacks a record for this actor; fall back to the task in ax-server
+	// when it exists, with $0 own cost and any descendants' Cost Service costs.
 	targetAtespace := atespace
 	targetName := strings.TrimSpace(target)
 	if parts := strings.SplitN(targetName, "/", 2); len(parts) == 2 {
@@ -493,14 +516,14 @@ func resolveActorDetail(ctx context.Context, client *finops.Client, axServerURL,
 	}
 	_ = json.Unmarshal(raw, &rawReport)
 
-	actor := &finops.ActorCost{
+	actor := &costapi.ActorCost{
 		Atespace: targetAtespace,
 		Name:     targetName,
 		Class:    "agent",
 		IsAgent:  true,
 	}
 	rawActor, _ := json.Marshal(actor)
-	m = &finops.ActorMatch{
+	m = &costapi.ActorMatch{
 		Actor:     actor,
 		Raw:       rawActor,
 		RawActors: rawReport.Actors,
@@ -513,17 +536,17 @@ func resolveActorDetail(ctx context.Context, client *finops.Client, axServerURL,
 }
 
 // taskView is what the CLI shows about an actor's task: the AX server's
-// record when it is reachable, else what FinOps reports.
+// record when it is reachable, else what the Cost Service reports.
 type taskView struct {
 	name, parent, phase, outcome string
-	// outcomeSource is FinOps' outcomeSource; "" reads as "sandbox".
+	// outcomeSource is the Cost Service's outcomeSource; "" reads as "sandbox".
 	outcomeSource string
 	budgetUSD     float64
 	exitCode      *int32
 	finishedAt    string
 }
 
-func viewTask(a *finops.ActorCost, task *v1alpha1.Task) *taskView {
+func viewTask(a *costapi.ActorCost, task *v1alpha1.Task) *taskView {
 	switch {
 	case task != nil:
 		v := &taskView{
@@ -539,7 +562,7 @@ func viewTask(a *finops.ActorCost, task *v1alpha1.Task) *taskView {
 			if f := task.GetStatus().GetFinishedAt(); f != nil {
 				v.finishedAt = f.AsTime().UTC().Format(time.RFC3339)
 			}
-			// ax-server's outcome is the runner's exit code; FinOps may know
+			// ax-server's outcome is the runner's exit code; the Cost Service may know
 			// of outside evidence for the same outcome.
 			if a != nil && a.Task != nil && a.Task.Outcome == v.outcome {
 				v.outcomeSource = a.Task.OutcomeSource
@@ -555,7 +578,7 @@ func viewTask(a *finops.ActorCost, task *v1alpha1.Task) *taskView {
 // overBudget reports whether spend passes a set budget.
 func overBudget(spend, budget float64) bool { return budget > 0 && spend > budget }
 
-func renderCostList(out io.Writer, report *finops.CostReport, scope string, tasks map[string]*v1alpha1.Task, wide bool) error {
+func renderCostList(out io.Writer, report *costapi.CostReport, scope string, tasks map[string]*v1alpha1.Task, wide bool) error {
 	applyReportTaskRollups(report, tasks)
 	rows := report.Actors
 	serverFiltered := scope == "" || report.Atespace == scope
@@ -677,7 +700,7 @@ func renderCostList(out io.Writer, report *finops.CostReport, scope string, task
 	return nil
 }
 
-func actorClass(a finops.ActorCost) string {
+func actorClass(a costapi.ActorCost) string {
 	if a.Class != "" {
 		return a.Class
 	}
@@ -687,8 +710,8 @@ func actorClass(a finops.ActorCost) string {
 	return "shared"
 }
 
-func noteRows(rows []finops.ActorCost) []finops.ActorCost {
-	var out []finops.ActorCost
+func noteRows(rows []costapi.ActorCost) []costapi.ActorCost {
+	var out []costapi.ActorCost
 	for _, a := range rows {
 		if a.Note != "" {
 			out = append(out, a)
@@ -709,8 +732,8 @@ func printCostBasis(out io.Writer, estimated bool) {
 
 // printCostWarnings prints one warning line when some spend is not in the
 // numbers: calls with unknown or no price, leases with no price, non-ok usage
-// reports, or spend that FinOps could not put on an actor.
-func printCostWarnings(out io.Writer, totals finops.Totals, compute finops.ComputeSummary, notes []finops.ActorCost) {
+// reports, or spend that the Cost Service could not put on an actor.
+func printCostWarnings(out io.Writer, totals costapi.Totals, compute costapi.ComputeSummary, notes []costapi.ActorCost) {
 	var parts []string
 	if n := totals.UnknownCostCalls; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d calls with unknown cost (no usage report)", n))
@@ -739,7 +762,7 @@ func printCostWarnings(out io.Writer, totals finops.Totals, compute finops.Compu
 	}
 }
 
-// actorDetailExport is the -o json/yaml form of `ax cost task`. The FinOps
+// actorDetailExport is the -o json/yaml form of `ax cost task`. The Cost Service
 // rows are the server's JSON as it came; axTask is the AX server's task.
 type actorDetailExport struct {
 	Actor     json.RawMessage   `json:"actor"`
@@ -750,7 +773,7 @@ type actorDetailExport struct {
 	SubAgents []json.RawMessage `json:"subAgents,omitempty"`
 }
 
-func renderActorDetail(out io.Writer, m *finops.ActorMatch, task *v1alpha1.Task, outputFormat string) error {
+func renderActorDetail(out io.Writer, m *costapi.ActorMatch, task *v1alpha1.Task, outputFormat string, budgets *costapi.BudgetsReport) error {
 	a := m.Actor
 	if isStructured(outputFormat) {
 		exp := actorDetailExport{
@@ -789,11 +812,13 @@ func renderActorDetail(out io.Writer, m *finops.ActorMatch, task *v1alpha1.Task,
 	}
 	fmt.Fprintf(out, "Sub-Agents:         %d\n", a.SubAgents)
 	printTaskBudget(out, a, viewTask(a, task))
+	printBudgetState(out, budgets, a.Atespace, a.Name, task.GetStatus().GetBudgetGroup())
+	printHolds(out, task.GetStatus().GetHolds())
 
 	printActorCostSections(out, a, m.SessionCosts, m.Children)
 	fmt.Fprintln(out)
 	printCostBasis(out, m.Report.Estimated())
-	printCostWarnings(out, finops.Totals{UnknownCostCalls: a.UnknownCostCalls, UnpricedCalls: a.UnpricedCalls, UsageStatus: a.UsageStatus}, a.Compute, nil)
+	printCostWarnings(out, costapi.Totals{UnknownCostCalls: a.UnknownCostCalls, UnpricedCalls: a.UnpricedCalls, UsageStatus: a.UsageStatus}, a.Compute, nil)
 	return nil
 }
 
@@ -809,7 +834,7 @@ func outcomeEvidence(source string) string {
 
 // printTaskBudget prints the task's place in the tree, its outcome, and its
 // spend (LLM plus compute) against its budget.
-func printTaskBudget(out io.Writer, a *finops.ActorCost, v *taskView) {
+func printTaskBudget(out io.Writer, a *costapi.ActorCost, v *taskView) {
 	if v == nil {
 		return
 	}
@@ -845,8 +870,8 @@ func printTaskBudget(out io.Writer, a *finops.ActorCost, v *taskView) {
 	fmt.Fprintf(out, "Spend (LLM+compute): own %s (%.1f%% of budget), tree %s (%.1f%%)%s\n",
 		formatUSD(own), 100*own/v.budgetUSD, formatUSD(tree), 100*tree/v.budgetUSD, flag)
 }
-func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finops.SessionCost, children []finops.ActorCost) {
-	// Per-actor costs come from FinOps; tree totals are rolled up from the Ax
+func printActorCostSections(out io.Writer, a *costapi.ActorCost, sessions []costapi.SessionCost, children []costapi.ActorCost) {
+	// Per-actor costs come from the Cost Service; tree totals are rolled up from the Ax
 	// task tree.
 	bookedCompute := a.Compute.Cost.USD()
 	measuredCompute := a.MeasuredComputeCost.USD()
@@ -950,7 +975,7 @@ func printActorCostSections(out io.Writer, a *finops.ActorCost, sessions []finop
 	}
 }
 
-func renderCurveReport(out io.Writer, curve *finops.CurveReport) error {
+func renderCurveReport(out io.Writer, curve *costapi.CurveReport) error {
 	fmt.Fprintf(out, "Hosting Cost Sensitivity Curve (< $%.2f / agent-month claim)\n", curve.TargetUSD)
 	fmt.Fprintf(out, "  Storage / Agent-Mo:    %s\n\n", formatUSD(curve.StoragePerAgentUSD))
 
@@ -1015,7 +1040,7 @@ func renderCurveReport(out io.Writer, curve *finops.CurveReport) error {
 // renderFocusReport prints the FOCUS 1.3 allocation keys. They hold usage
 // only: the holder of the bill divides each key by its resource's total and
 // writes the split cost rows, so there is no cost column here.
-func renderFocusReport(out io.Writer, focus *finops.FocusReport) error {
+func renderFocusReport(out io.Writer, focus *costapi.FocusReport) error {
 	fmt.Fprintf(out, "FOCUS 1.3 Allocation Keys\n")
 	if focus.ChargePeriodStart != "" || focus.ChargePeriodEnd != "" {
 		fmt.Fprintf(out, "  Charge Period:   %s to %s\n", firstNonEmpty(focus.ChargePeriodStart, "-"), firstNonEmpty(focus.ChargePeriodEnd, "-"))
@@ -1037,7 +1062,7 @@ func renderFocusReport(out io.Writer, focus *finops.FocusReport) error {
 }
 
 // focusUsage joins a key's elements as "<quantity> <unit>" pairs.
-func focusUsage(k finops.AllocationKey) string {
+func focusUsage(k costapi.AllocationKey) string {
 	var parts []string
 	for _, e := range k.AllocatedMethodDetails.Elements {
 		unit := e.UsageUnit
@@ -1052,11 +1077,11 @@ func focusUsage(k finops.AllocationKey) string {
 	return strings.Join(parts, ", ")
 }
 
-func focusTenant(k finops.AllocationKey) string {
+func focusTenant(k costapi.AllocationKey) string {
 	return firstNonEmpty(k.Tag("tenant"), "-")
 }
 
-func focusClass(k finops.AllocationKey) string {
+func focusClass(k costapi.AllocationKey) string {
 	if class := k.Tag("class"); class != "" {
 		return class
 	}
@@ -1157,34 +1182,34 @@ func resolveOptionalAXServerURL(explicitServer, kubeContext string) string {
 	return ""
 }
 
-// resolveOptionalFinOpsURL returns a FinOps HTTP server URL if one is explicitly
+// resolveOptionalCostURL returns a Cost Service HTTP API URL if one is explicitly
 // configured or reachable through the tunnel saved for the kube context. It
 // never uses a local port that no saved tunnel names for the context.
-func resolveOptionalFinOpsURL(finopsServer, kubeContext string) string {
-	if finopsServer != "" {
-		return finopsServer
+func resolveOptionalCostURL(costServer, kubeContext string) string {
+	if costServer != "" {
+		return costServer
 	}
-	if env := os.Getenv("AX_FINOPS_SERVER"); env != "" {
+	if env := tunnel.CostServerFromEnv(); env != "" {
 		return env
 	}
 	if ctxName, err := tunnel.CurrentContext(kubeContext); err == nil && ctxName != "" {
-		if existing, err := tunnel.GetTunnel(tunnel.FinOpsTunnelKey(ctxName)); err == nil && existing != nil && tunnel.IsFinOpsTunnelHealthy(existing.Port) {
+		if existing, err := tunnel.GetTunnel(tunnel.CostTunnelKey(ctxName)); err == nil && existing != nil && tunnel.IsCostTunnelHealthy(existing.Port) {
 			return fmt.Sprintf("http://127.0.0.1:%d", existing.Port)
 		}
 	}
 	return ""
 }
 
-// tryPrintTaskDescribeCost appends FinOps cost attribution to `ax describe task`
-// when a FinOps server is reachable and has records for the task's actor or
+// tryPrintTaskDescribeCost appends Cost Service cost attribution to `ax describe task`
+// when a Cost Service is reachable and has records for the task's actor or
 // its sub-agent tasks.
-func tryPrintTaskDescribeCost(out io.Writer, finopsURL string, task *v1alpha1.Task, allTasks ...map[string]*v1alpha1.Task) {
-	if finopsURL == "" || task.GetMetadata() == nil {
+func tryPrintTaskDescribeCost(out io.Writer, costURL string, task *v1alpha1.Task, allTasks ...map[string]*v1alpha1.Task) {
+	if costURL == "" || task.GetMetadata() == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	client := finops.NewClient(finopsURL, nil)
+	client := costapi.NewClient(costURL, nil)
 	atespace := firstNonEmpty(task.GetMetadata().GetAtespace(), "default")
 	name := task.GetMetadata().GetName()
 	var taskMap map[string]*v1alpha1.Task
@@ -1195,17 +1220,27 @@ func tryPrintTaskDescribeCost(out io.Writer, finopsURL string, task *v1alpha1.Ta
 		taskMap[taskKey(atespace, name)] = task
 	}
 	children := buildTaskChildren(taskMap)
+	budgets := fetchBudgets(ctx, client, atespace)
+	group := task.GetStatus().GetBudgetGroup()
+	// printBudgetOnly shows the budget state of a task with no cost records.
+	printBudgetOnly := func() {
+		if len(budgets.BudgetsFor(atespace, name, group)) > 0 {
+			fmt.Fprintln(out, "\nCost:")
+			printBudgetState(out, budgets, atespace, name, group)
+		}
+	}
 
 	// The actor is named after the task, in the task's atespace.
 	m, err := client.GetActorCost(ctx, atespace, true, name)
-	var amb *finops.AmbiguousError
+	var amb *costapi.AmbiguousError
 	if errors.As(err, &amb) {
-		fmt.Fprintf(out, "\nFinOps: %v\n", err)
+		fmt.Fprintf(out, "\nCost Service: %v\n", err)
 		return
 	}
 	if err != nil {
-		var notFound *finops.NotFoundError
+		var notFound *costapi.NotFoundError
 		if !errors.As(err, &notFound) || len(children) == 0 {
+			printBudgetOnly()
 			return
 		}
 		report, raw, rErr := client.GetCosts(ctx, atespace)
@@ -1215,26 +1250,27 @@ func tryPrintTaskDescribeCost(out io.Writer, finopsURL string, task *v1alpha1.Ta
 		hasDescendantCost := false
 		for _, descKey := range taskDescendants(children, taskKey(atespace, name)) {
 			ns, dName, _ := strings.Cut(descKey, "/")
-			if finops.CanonicalActorIndex(report.Actors, ns, dName) >= 0 {
+			if costapi.CanonicalActorIndex(report.Actors, ns, dName) >= 0 {
 				hasDescendantCost = true
 				break
 			}
 		}
 		if !hasDescendantCost {
+			printBudgetOnly()
 			return
 		}
 		var rawReport struct {
 			Actors []json.RawMessage `json:"actors"`
 		}
 		_ = json.Unmarshal(raw, &rawReport)
-		actor := &finops.ActorCost{
+		actor := &costapi.ActorCost{
 			Atespace: atespace,
 			Name:     name,
 			Class:    "agent",
 			IsAgent:  true,
 		}
 		rawActor, _ := json.Marshal(actor)
-		m = &finops.ActorMatch{
+		m = &costapi.ActorMatch{
 			Actor:     actor,
 			Raw:       rawActor,
 			RawActors: rawReport.Actors,
@@ -1243,10 +1279,11 @@ func tryPrintTaskDescribeCost(out io.Writer, finopsURL string, task *v1alpha1.Ta
 		}
 	}
 	m.Children, m.SubAgents = rollupActorTree(m.Actor, m.Canonical, m.Report.Actors, m.RawActors, children)
-	fmt.Fprintln(out, "\nFinOps Cost:")
+	fmt.Fprintln(out, "\nCost:")
 	printTaskBudget(out, m.Actor, viewTask(m.Actor, task))
+	printBudgetState(out, budgets, atespace, name, group)
 	printActorCostSections(out, m.Actor, m.SessionCosts, m.Children)
 	fmt.Fprintln(out)
 	printCostBasis(out, m.Report.Estimated())
-	printCostWarnings(out, finops.Totals{UnknownCostCalls: m.Actor.UnknownCostCalls, UnpricedCalls: m.Actor.UnpricedCalls, UsageStatus: m.Actor.UsageStatus}, m.Actor.Compute, nil)
+	printCostWarnings(out, costapi.Totals{UnknownCostCalls: m.Actor.UnknownCostCalls, UnpricedCalls: m.Actor.UnpricedCalls, UsageStatus: m.Actor.UsageStatus}, m.Actor.Compute, nil)
 }

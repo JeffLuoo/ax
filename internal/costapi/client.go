@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package finops provides an HTTP client for querying the Agent FinOps cost
+// Package costapi provides an HTTP client for querying the Cost Service cost
 // and allocation APIs (/v1/costs, /v1/costs/curve, /v1/costs/focus).
-package finops
+package costapi
 
 import (
 	"context"
@@ -27,16 +27,16 @@ import (
 	"time"
 )
 
-// DefaultFinOpsNamespace is the default Kubernetes namespace where the FinOps
-// service runs.
-const DefaultFinOpsNamespace = "ate-finops"
+// DefaultNamespace is the default Kubernetes namespace where the Cost Service
+// runs.
+const DefaultNamespace = "ate-cost"
 
-// DefaultFinOpsService is the default Kubernetes Service name for the FinOps
-// HTTP API.
-const DefaultFinOpsService = "finops"
+// DefaultService is the default Kubernetes Service name for the Cost Service
+// HTTP API (cost.ate-cost.svc).
+const DefaultService = "cost"
 
-// DefaultFinOpsPort is the default HTTP port exposed by the FinOps service.
-const DefaultFinOpsPort = 9090
+// DefaultPort is the default HTTP port of the Cost Service.
+const DefaultPort = 9090
 
 // MoneyMap holds currency-keyed amounts (e.g. {"USD": 0.0659125}).
 type MoneyMap map[string]float64
@@ -126,7 +126,7 @@ type ActorCost struct {
 	Template      string `json:"template,omitempty" yaml:"template,omitempty"`
 	Class         string `json:"class,omitempty" yaml:"class,omitempty"`
 	IsAgent       bool   `json:"isAgent" yaml:"isAgent"`
-	// Note is set on a row that is not one actor: spend whose actor finops
+	// Note is set on a row that is not one actor: spend whose actor the Cost Service
 	// could not identify, or actors beyond its limit. Such a row has no name.
 	Note                  string           `json:"note,omitempty" yaml:"note,omitempty"`
 	Calls                 int64            `json:"calls" yaml:"calls"`
@@ -152,13 +152,13 @@ type ActorCost struct {
 	TreeLLMCost           MoneyMap         `json:"treeLlmCost,omitempty" yaml:"treeLlmCost,omitempty"`
 	TreeComputeCost       MoneyMap         `json:"treeComputeCost,omitempty" yaml:"treeComputeCost,omitempty"`
 	TreeTotalCost         MoneyMap         `json:"treeTotalCost,omitempty" yaml:"treeTotalCost,omitempty"`
-	// Task is the Ax task that the actor runs, when finops knows it.
+	// Task is the Ax task that the actor runs, when the Cost Service knows it.
 	Task   *TaskCost   `json:"task,omitempty" yaml:"task,omitempty"`
 	Models []ModelCost `json:"models,omitempty" yaml:"models,omitempty"`
 }
 
 // TaskCost is the Ax task that an actor runs, with the actor's spend against
-// the task's budget, as finops reports it. Spend is LLM plus compute, in USD.
+// the task's budget, as the Cost Service reports it. Spend is LLM plus compute, in USD.
 type TaskCost struct {
 	Name           string  `json:"name" yaml:"name"`
 	Parent         string  `json:"parent,omitempty" yaml:"parent,omitempty"`
@@ -383,17 +383,17 @@ func (r CostReport) Estimated() bool {
 	return r.EstimatedFlag || r.CostBasis == "" || r.CostBasis == CostBasisEstimated
 }
 
-// Client queries the FinOps HTTP server.
+// Client queries the Cost Service HTTP API.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
 }
 
-// NewClient creates a new FinOps HTTP client targeting baseURL.
+// NewClient creates a new Cost Service HTTP client targeting baseURL.
 func NewClient(baseURL string, httpClient *http.Client) *Client {
 	u := strings.TrimSpace(baseURL)
 	if u == "" {
-		u = fmt.Sprintf("http://127.0.0.1:%d", DefaultFinOpsPort)
+		u = fmt.Sprintf("http://127.0.0.1:%d", DefaultPort)
 	}
 	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 		u = "http://" + u
@@ -408,7 +408,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	}
 }
 
-// BaseURL returns the normalized base URL of the FinOps server.
+// BaseURL returns the normalized base URL of the Cost Service.
 func (c *Client) BaseURL() string {
 	return c.baseURL
 }
@@ -444,14 +444,14 @@ type ActorMatch struct {
 	Report    *CostReport
 }
 
-// NotFoundError is returned when GetActorCost finds no FinOps record for the
+// NotFoundError is returned when GetActorCost finds no Cost Service record for the
 // target actor.
 type NotFoundError struct {
 	Target string
 }
 
 func (e *NotFoundError) Error() string {
-	return fmt.Sprintf("no FinOps cost record found for %q", e.Target)
+	return fmt.Sprintf("no Cost Service cost record found for %q", e.Target)
 }
 
 // AmbiguousError is returned when a name or UID prefix matches more than one
@@ -462,7 +462,7 @@ type AmbiguousError struct {
 }
 
 func (e *AmbiguousError) Error() string {
-	return fmt.Sprintf("%q matches %d FinOps cost records (%s); name one by its full actor UID", e.Target, len(e.Candidates), strings.Join(e.Candidates, ", "))
+	return fmt.Sprintf("%q matches %d cost records (%s); name one by its full actor UID", e.Target, len(e.Candidates), strings.Join(e.Candidates, ", "))
 }
 
 // MinUIDPrefix is the shortest UID prefix that GetActorCost accepts.
@@ -495,7 +495,7 @@ func (c *Client) GetActorCost(ctx context.Context, atespace string, atespaceExpl
 		Sessions []json.RawMessage `json:"sessions"`
 	}
 	if err := json.Unmarshal(raw, &rawReport); err != nil || len(rawReport.Actors) != len(report.Actors) || len(rawReport.Sessions) != len(report.Sessions) {
-		return nil, fmt.Errorf("decoding the FinOps cost report rows: %v", err)
+		return nil, fmt.Errorf("decoding the Cost Service cost report rows: %v", err)
 	}
 
 	inScope := func(a ActorCost) bool { return !atespaceExplicit || a.Atespace == atespace }

@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/ax/internal/finops"
+	"github.com/google/ax/internal/costapi"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store/memory"
 	"github.com/google/ax/internal/tunnel"
@@ -204,7 +204,7 @@ func TestCostTask_ShowsBudgetSpendAndOutcome(t *testing.T) {
 		}
 	}
 
-	// Without ax-server, the task fields come from FinOps.
+	// Without ax-server, the task fields come from the Cost Service.
 	out, err = captureStdout(t, func() error { return runCost(srv.URL, "", "team-a", true, []string{"task", "agent-1"}) })
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ func TestCostTask_ShowsBudgetSpendAndOutcome(t *testing.T) {
 		}
 	}
 
-	// -o json carries the FinOps row as it came and the AX task.
+	// -o json carries the Cost Service row as it came and the AX task.
 	out, err = captureStdout(t, func() error { return runCost(srv.URL, ax, "team-a", true, []string{"task", "agent-1", "-o", "json"}) })
 	if err != nil {
 		t.Fatal(err)
@@ -238,12 +238,12 @@ func TestDescribeTaskCost_UsesTheTasksAtespaceAndReportsAmbiguity(t *testing.T) 
 		Metadata: &v1alpha1.ObjectMeta{Name: "agent-1", Atespace: "team-a"},
 		Spec:     &v1alpha1.TaskSpec{Budget: &v1alpha1.Budget{MaxUsd: 1}},
 	})
-	for _, want := range []string{"FinOps Cost:", "Budget:             $1.000000", "Outcome:            - (the command has not exited)", "Hosting Cost Breakdown"} {
+	for _, want := range []string{"Cost:", "Budget:             $1.000000", "Outcome:            - (the command has not exited)", "Hosting Cost Breakdown"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("describe output lacks %q:\n%s", want, buf.String())
 		}
 	}
-	// A task in another atespace has no FinOps record there: nothing is shown.
+	// A task in another atespace has no Cost Service record there: nothing is shown.
 	buf.Reset()
 	tryPrintTaskDescribeCost(&buf, srv.URL, &v1alpha1.Task{Metadata: &v1alpha1.ObjectMeta{Name: "agent-1", Atespace: "team-b"}})
 	if buf.Len() != 0 {
@@ -254,7 +254,7 @@ func TestDescribeTaskCost_UsesTheTasksAtespaceAndReportsAmbiguity(t *testing.T) 
 		{"atespace":"team-a","name":"agent-1","uid":"u1"},{"atespace":"team-a","name":"agent-1","uid":"u2"}]}`})
 	buf.Reset()
 	tryPrintTaskDescribeCost(&buf, recreated.URL, &v1alpha1.Task{Metadata: &v1alpha1.ObjectMeta{Name: "agent-1", Atespace: "team-a"}})
-	if !strings.Contains(buf.String(), "matches 2 FinOps cost records") {
+	if !strings.Contains(buf.String(), "matches 2 cost records") {
 		t.Errorf("a recreated actor did not report the ambiguity:\n%s", buf.String())
 	}
 }
@@ -318,14 +318,14 @@ func TestCostFocus_NoKeys(t *testing.T) {
 }
 
 func TestAllocationKeyHelpers(t *testing.T) {
-	k := finops.AllocationKey{
-		AllocatedMethodDetails: finops.FocusMethodDetails{Elements: []finops.FocusElement{{UsageQuantity: 2, UsageUnit: finops.UnitSlotHours}}},
+	k := costapi.AllocationKey{
+		AllocatedMethodDetails: costapi.FocusMethodDetails{Elements: []costapi.FocusElement{{UsageQuantity: 2, UsageUnit: costapi.UnitSlotHours}}},
 		AllocatedTags:          map[string]string{"tenant": "plain", "agent-cost/class": "agent"},
 	}
-	if q, ok := k.Quantity(finops.UnitSlotHours); !ok || q != 2 {
+	if q, ok := k.Quantity(costapi.UnitSlotHours); !ok || q != 2 {
 		t.Errorf("Quantity(Slot-Hours) = %v, %t", q, ok)
 	}
-	if _, ok := k.Quantity(finops.UnitTokens); ok {
+	if _, ok := k.Quantity(costapi.UnitTokens); ok {
 		t.Error("Quantity(Tokens) found on a compute key")
 	}
 	if k.Tag("tenant") != "plain" || k.Tag("class") != "agent" || k.Tag("missing") != "" {
@@ -335,7 +335,7 @@ func TestAllocationKeyHelpers(t *testing.T) {
 
 func TestStopContextTunnels_StopsBothTunnels(t *testing.T) {
 	t.Setenv("AX_HOME", t.TempDir())
-	for _, key := range []string{"prod", tunnel.FinOpsTunnelKey("prod")} {
+	for _, key := range []string{"prod", tunnel.CostTunnelKey("prod")} {
 		if err := tunnel.SaveTunnel(&tunnel.TunnelInfo{Context: key, Port: 1}); err != nil {
 			t.Fatal(err)
 		}
@@ -344,7 +344,7 @@ func TestStopContextTunnels_StopsBothTunnels(t *testing.T) {
 	if err := stopContextTunnels(&buf, "prod"); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"prod", "prod-finops"} {
+	for _, key := range []string{"prod", "prod-cost"} {
 		if _, err := tunnel.GetTunnel(key); !os.IsNotExist(err) {
 			t.Errorf("tunnel %q still saved (err %v)", key, err)
 		}
@@ -357,8 +357,9 @@ func TestStopContextTunnels_StopsBothTunnels(t *testing.T) {
 	}
 }
 
-func TestResolveOptionalFinOpsURL_UsesOnlyTheContextsTunnel(t *testing.T) {
+func TestResolveOptionalCostURL_UsesOnlyTheContextsTunnel(t *testing.T) {
 	t.Setenv("AX_HOME", t.TempDir())
+	t.Setenv("AX_COST_SERVER", "")
 	t.Setenv("AX_FINOPS_SERVER", "")
 	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
@@ -375,17 +376,17 @@ func TestResolveOptionalFinOpsURL_UsesOnlyTheContextsTunnel(t *testing.T) {
 	}
 
 	// A healthy tunnel saved for another context is not used.
-	if err := tunnel.SaveTunnel(&tunnel.TunnelInfo{Context: tunnel.FinOpsTunnelKey("staging"), Port: port}); err != nil {
+	if err := tunnel.SaveTunnel(&tunnel.TunnelInfo{Context: tunnel.CostTunnelKey("staging"), Port: port}); err != nil {
 		t.Fatal(err)
 	}
-	if got := resolveOptionalFinOpsURL("", "prod"); got != "" {
-		t.Errorf("resolveOptionalFinOpsURL for prod = %q, want none (the tunnel belongs to staging)", got)
+	if got := resolveOptionalCostURL("", "prod"); got != "" {
+		t.Errorf("resolveOptionalCostURL for prod = %q, want none (the tunnel belongs to staging)", got)
 	}
-	if got := resolveOptionalFinOpsURL("", "staging"); got != "http://127.0.0.1:"+portStr {
-		t.Errorf("resolveOptionalFinOpsURL for staging = %q", got)
+	if got := resolveOptionalCostURL("", "staging"); got != "http://127.0.0.1:"+portStr {
+		t.Errorf("resolveOptionalCostURL for staging = %q", got)
 	}
-	if got := resolveOptionalFinOpsURL("http://explicit:9090", "prod"); got != "http://explicit:9090" {
-		t.Errorf("an explicit --finops-server was not used: %q", got)
+	if got := resolveOptionalCostURL("http://explicit:9090", "prod"); got != "http://explicit:9090" {
+		t.Errorf("an explicit --cost-server was not used: %q", got)
 	}
 }
 

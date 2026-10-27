@@ -24,12 +24,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/ax/internal/finops"
+	"github.com/google/ax/internal/costapi"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 )
 
-// The files testdata/finops-*.json and finops-focus.csv are the responses of
-// the Cost Service HTTP handlers (github.com/JeffLuoo/finops, main at b5c4eae)
+// The files testdata/costs-*.json, curve.json, focus.json, and focus.csv are the responses of
+// Cost Service HTTP handlers (github.com/JeffLuoo/agent-cost, main at b5c4eae, when the repository was named finops)
 // for the actors team-a/root (task completed, one lease still open) and
 // team-a/child (task failed over its budget), plus team-b/solo outside the
 // atespace. Regenerate them whenever the Cost Service HTTP API changes, so
@@ -55,17 +55,17 @@ func strictDecode(t *testing.T, name string, v any) {
 	}
 }
 
-func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
-	var report finops.CostReport
-	strictDecode(t, "finops-costs-team-a.json", &report)
-	strictDecode(t, "finops-costs-all.json", &finops.CostReport{})
-	var curve finops.CurveReport
-	strictDecode(t, "finops-curve.json", &curve)
-	var focus finops.FocusReport
-	strictDecode(t, "finops-focus.json", &focus)
+func TestCostContract_GoldenDecodesStrictly(t *testing.T) {
+	var report costapi.CostReport
+	strictDecode(t, "costs-team-a.json", &report)
+	strictDecode(t, "costs-all.json", &costapi.CostReport{})
+	var curve costapi.CurveReport
+	strictDecode(t, "curve.json", &curve)
+	var focus costapi.FocusReport
+	strictDecode(t, "focus.json", &focus)
 
 	// The keys that the CLI reads are the keys that the server sends.
-	if report.Atespace != "team-a" || report.CostBasis != finops.CostBasisEstimated {
+	if report.Atespace != "team-a" || report.CostBasis != costapi.CostBasisEstimated {
 		t.Errorf("atespace %q, costBasis %q", report.Atespace, report.CostBasis)
 	}
 	if len(report.Curve) == 0 || report.OutcomeCosts == nil {
@@ -78,7 +78,7 @@ func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
 		report.Compute.Cost.USD() < report.InFlightComputeCost.USD() {
 		t.Errorf("estimated %t, inFlightComputeCost %v, compute %+v", report.EstimatedFlag, report.InFlightComputeCost, report.Compute)
 	}
-	byName := map[string]finops.ActorCost{}
+	byName := map[string]costapi.ActorCost{}
 	for _, a := range report.Actors {
 		byName[a.Name] = a
 	}
@@ -93,7 +93,7 @@ func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
 	if len(curve.Tiers) == 0 || len(curve.Tiers[0].Points) == 0 {
 		t.Errorf("curve = %+v", curve)
 	}
-	if focus.Kind != finops.FocusReportKind || focus.ChargePeriodStart == "" || len(focus.AllocationKeys) == 0 {
+	if focus.Kind != costapi.FocusReportKind || focus.ChargePeriodStart == "" || len(focus.AllocationKeys) == 0 {
 		t.Fatalf("focus kind %q, period %q, %d keys", focus.Kind, focus.ChargePeriodStart, len(focus.AllocationKeys))
 	}
 	methods := map[string]bool{}
@@ -108,7 +108,7 @@ func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
 			}
 		}
 		if k.AllocatedMethodID == "booked-share" {
-			if q, ok := k.Quantity(finops.UnitSlotHours); !ok || q <= 0 {
+			if q, ok := k.Quantity(costapi.UnitSlotHours); !ok || q <= 0 {
 				t.Errorf("compute key without Slot-Hours: %+v", k)
 			}
 		}
@@ -118,19 +118,19 @@ func TestFinOpsContract_GoldenDecodesStrictly(t *testing.T) {
 	}
 }
 
-func TestFinOpsContract_CLIRendersTheGolden(t *testing.T) {
+func TestCostContract_CLIRendersTheGolden(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := map[string]string{"/v1/costs": "finops-costs-all.json", "/v1/costs/curve": "finops-curve.json", "/v1/costs/focus": "finops-focus.json"}[r.URL.Path]
+		name := map[string]string{"/v1/costs": "costs-all.json", "/v1/costs/curve": "curve.json", "/v1/costs/focus": "focus.json"}[r.URL.Path]
 		switch {
 		case name == "":
 			http.NotFound(w, r)
 			return
 		case r.URL.Path == "/v1/costs/focus" && r.URL.Query().Get("format") == "csv":
 			w.Header().Set("Content-Type", "text/csv")
-			_, _ = w.Write(readGolden(t, "finops-focus.csv"))
+			_, _ = w.Write(readGolden(t, "focus.csv"))
 			return
 		case r.URL.Path == "/v1/costs" && r.URL.Query().Get("atespace") == "team-a":
-			name = "finops-costs-team-a.json"
+			name = "costs-team-a.json"
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(readGolden(t, name))

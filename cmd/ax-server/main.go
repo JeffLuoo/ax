@@ -137,6 +137,9 @@ func main() {
 		defer subClient.Close()
 		tr := controller.NewTaskReconciler(subClient, defaultTemplate, defaultTemplateAtespace)
 		tr.DefaultLimits = substrate.Limits{CPU: defaultTaskCPU, Memory: defaultTaskMemory}
+		// Budget labels follow spec.parent up to the task that owns the
+		// tree's budget.
+		tr.Tasks = rStore.GetTask
 		reconciler = tr
 	}
 

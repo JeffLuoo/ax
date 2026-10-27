@@ -653,3 +653,28 @@ status:
 		t.Errorf("status = %v", task.GetStatus())
 	}
 }
+
+func TestValidateBudget(t *testing.T) {
+	for _, b := range []*v1alpha1.Budget{nil, {MaxUsd: 5}, {MaxUsd: 5, WarnAt: 0.8, Scope: v1alpha1.BudgetScopeTree}, {MaxUsd: 1, Scope: v1alpha1.BudgetScopeTask}} {
+		if err := v1alpha1.ValidateBudget(b); err != nil {
+			t.Errorf("ValidateBudget(%v) = %v", b, err)
+		}
+	}
+	for _, b := range []*v1alpha1.Budget{{MaxUsd: -1}, {MaxUsd: math.Inf(1)}, {MaxUsd: 1, WarnAt: 1}, {MaxUsd: 1, WarnAt: -0.1}, {MaxUsd: 1, Scope: "tree"}} {
+		if err := v1alpha1.ValidateBudget(b); err == nil {
+			t.Errorf("ValidateBudget(%v) accepted", b)
+		}
+	}
+}
+
+func TestBudgetYAMLRoundTrip(t *testing.T) {
+	in := "apiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: planner\nspec:\n  budget:\n    maxUsd: 5\n    warnAt: 0.8\n    scope: Tree\n"
+	var task v1alpha1.Task
+	if err := yaml.Unmarshal([]byte(in), &task); err != nil {
+		t.Fatal(err)
+	}
+	b := task.GetSpec().GetBudget()
+	if b.GetMaxUsd() != 5 || b.GetWarnAt() != 0.8 || b.GetScope() != "Tree" {
+		t.Errorf("budget = %v", b)
+	}
+}

@@ -26,9 +26,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/cenkalti/backoff/v5"
 	"github.com/google/ax/pkg/apis/v1alpha1"
+	"go.ate.dev/substrate/pkg/proto/ateapipb"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -356,8 +357,8 @@ func BuildActorTemplate(atespace, name, image string, envMap map[string]string, 
 			Image:   image,
 			Command: command,
 			Env:     envList,
-			WakeupProbe: &ateapipb.ContainerWakeupProbe{
-				HttpGet: &ateapipb.HTTPGetAction{
+			WakeupProbe: &ateapipb.WakeupProbe{
+				HttpGet: &ateapipb.HttpGetAction{
 					Path: "/readyz",
 					Port: 80,
 				},
@@ -376,7 +377,7 @@ func BuildActorTemplate(atespace, name, image string, envMap map[string]string, 
 			PreferredFidelity: ateapipb.SnapshotFidelity_SNAPSHOT_FIDELITY_VOLUMES,
 		},
 		SandboxConfig: &ateapipb.SandboxConfig{
-			SandboxClass: ateapipb.SandboxClass_SANDBOX_CLASS_GVISOR,
+			SandboxClass: "gvisor",
 			ConfigName:   "gvisor-default",
 		},
 		Resources: limits.resources(),
@@ -482,12 +483,19 @@ func (c *Client) waitGoldenSnapshot(ctx context.Context, atespace, templateName 
 
 // EnsureActor creates an Actor in the specified atespace deriving from an ActorTemplate.
 func (c *Client) EnsureActor(ctx context.Context, atespace, actorName, templateAtespace, templateName string) (*ateapipb.Actor, error) {
+	return c.EnsureActorWithLabels(ctx, atespace, actorName, templateAtespace, templateName, nil)
+}
+
+// EnsureActorWithLabels is EnsureActor with labels set on a new actor. An
+// existing actor keeps its labels; use SetActorLabels to change them.
+func (c *Client) EnsureActorWithLabels(ctx context.Context, atespace, actorName, templateAtespace, templateName string, labels map[string]string) (*ateapipb.Actor, error) {
 	req := &ateapipb.CreateActorRequest{
 		Actor: &ateapipb.Actor{
 			Metadata: &ateapipb.ResourceMetadata{
 				Atespace: atespace,
 				Name:     actorName,
 			},
+			Labels: labels,
 			ActorTemplate: &ateapipb.ObjectRef{
 				Atespace: templateAtespace,
 				Name:     templateName,
@@ -586,7 +594,7 @@ func (c *Client) ensureDefaultEgressPolicy(ctx context.Context, atespace, actorN
 		EgressPolicy: &ateapipb.EgressPolicy{
 			Metadata: &ateapipb.ResourceMetadata{Atespace: atespace, Name: "default"},
 			Rules: []*ateapipb.EgressRule{{
-				Http: &ateapipb.HTTPRule{Hostnames: hosts},
+				Http: &ateapipb.HttpRule{Hostnames: hosts},
 			}},
 		},
 	})
@@ -712,6 +720,111 @@ func (c *Client) DeleteActor(ctx context.Context, atespace, actorName string) er
 			}
 		}
 	}
+}
+
+// SetActorLabels merges set into the actor's labels and removes the keys in
+// del. Substrate lets each caller manage only the label prefixes that it
+// owns; ax-server owns agent-cost/budget-*.
+func (c *Client) SetActorLabels(ctx context.Context, atespace, actorName string, set map[string]string, del []string) (*ateapipb.Actor, error) {
+	req := &ateapipb.SetActorLabelsRequest{
+		Actor:      &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
+		Labels:     set,
+		DeleteKeys: del,
+	}
+	var actor *ateapipb.Actor
+	err := retryOnCodes(ctx, func() error {
+		var err error
+		actor, err = c.control.SetActorLabels(ctx, req)
+		return err
+	}, codes.Aborted, codes.Unavailable)
+	if err != nil {
+		return nil, fmt.Errorf("setting labels on actor %s/%s: %w", atespace, actorName, err)
+	}
+	return actor, nil
+}
+
+// listActorsMaxPages bounds ListActors, so a misbehaving page token cannot
+// loop.
+const listActorsMaxPages = 50
+
+// ListActors returns the actors in the atespace.
+func (c *Client) ListActors(ctx context.Context, atespace string) ([]*ateapipb.Actor, error) {
+	var out []*ateapipb.Actor
+	token := ""
+	for page := 0; page < listActorsMaxPages; page++ {
+		var resp *ateapipb.ListActorsResponse
+		err := retryOnCodes(ctx, func() error {
+			var err error
+			resp, err = c.control.ListActors(ctx, &ateapipb.ListActorsRequest{Atespace: atespace, Options: &ateapipb.ListOptions{PageSize: 1000, PageToken: token}})
+			return err
+		}, codes.Unavailable)
+		if err != nil {
+			return nil, fmt.Errorf("listing actors in %s: %w", atespace, err)
+		}
+		out = append(out, resp.GetActors()...)
+		token = resp.GetNextPageToken()
+		if token == "" {
+			return out, nil
+		}
+	}
+	slog.Warn("actor listing was truncated", "atespace", atespace)
+	return out, nil
+}
+
+// Holds returns the actor's holds as Ax task status holds.
+func Holds(actor *ateapipb.Actor) []*v1alpha1.ActorHold {
+	var out []*v1alpha1.ActorHold
+	for _, h := range actor.GetStatus().GetHolds() {
+		out = append(out, &v1alpha1.ActorHold{
+			Name:      h.GetName(),
+			Reason:    h.GetReason(),
+			CreatedBy: h.GetCreatedBy(),
+			CreatedAt: h.GetCreatedAt(),
+		})
+	}
+	return out
+}
+
+// ActorHeldReason is the ErrorInfo reason of a resume that a hold refused.
+const ActorHeldReason = "ACTOR_HELD"
+
+// HeldError describes a resume that Substrate refused because the actor has
+// a hold.
+type HeldError struct {
+	// Hold is the name of the first hold, for example agent-cost/budget.
+	Hold string
+	// Reason is that hold's reason.
+	Reason string
+}
+
+func (e *HeldError) Error() string {
+	if e.Reason == "" {
+		return "actor held by " + e.Hold
+	}
+	return fmt.Sprintf("actor held by %s: %s", e.Hold, e.Reason)
+}
+
+// AsHeld returns the hold that made Substrate refuse a resume: a
+// FailedPrecondition error with ErrorInfo reason ACTOR_HELD. A hold is not
+// transient, so callers must not retry it.
+func AsHeld(err error) (*HeldError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var held *HeldError
+	if errors.As(err, &held) {
+		return held, true
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.FailedPrecondition {
+		return nil, false
+	}
+	for _, d := range st.Details() {
+		if info, ok := d.(*errdetails.ErrorInfo); ok && info.GetReason() == ActorHeldReason {
+			return &HeldError{Hold: info.GetMetadata()["hold"], Reason: info.GetMetadata()["reason"]}, true
+		}
+	}
+	return nil, false
 }
 
 // ListActorTemplates returns all ActorTemplates in the given atespace.

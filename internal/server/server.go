@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/google/ax/internal/auth"
+	"github.com/google/ax/internal/budget"
 	"github.com/google/ax/internal/events"
 	"github.com/google/ax/internal/lock"
 	"github.com/google/ax/internal/store"
@@ -43,6 +44,21 @@ type Reconciler interface {
 	Reconcile(ctx context.Context, task *v1alpha1.Task, workspaces ...*v1alpha1.Workspace) (*v1alpha1.Task, error)
 	ReconcileDelete(ctx context.Context, atespace, taskName string) error
 }
+
+// BudgetSyncer is implemented by a Reconciler that labels actors with task
+// budgets. UpdateTaskBudget calls it for the task and every task under it.
+type BudgetSyncer interface {
+	SyncBudgetLabels(ctx context.Context, task *v1alpha1.Task) (*v1alpha1.Task, error)
+}
+
+// ActorStateReader is implemented by a Reconciler that can read the live
+// holds of task actors. GetTask and ListTasks call it, best effort.
+type ActorStateReader interface {
+	RefreshActorState(ctx context.Context, tasks []*v1alpha1.Task)
+}
+
+// actorStateTimeout bounds the live hold read on GetTask and ListTasks.
+const actorStateTimeout = 2 * time.Second
 
 // Options configures the AX API Server.
 type Options struct {
@@ -164,7 +180,123 @@ func (s *Server) GetTask(ctx context.Context, req *v1alpha1.GetTaskRequest) (*v1
 		}
 		return nil, status.Errorf(codes.Internal, "getting task: %v", err)
 	}
+	s.refreshActorState(ctx, []*v1alpha1.Task{task})
 	return task, nil
+}
+
+// refreshActorState fills in live actor holds when the reconciler can read
+// them. The result is not stored: holds change without Ax.
+func (s *Server) refreshActorState(ctx context.Context, tasks []*v1alpha1.Task) {
+	r, ok := s.reconciler.(ActorStateReader)
+	if !ok || len(tasks) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, actorStateTimeout)
+	defer cancel()
+	r.RefreshActorState(ctx, tasks)
+}
+
+// UpdateTaskBudget replaces a task's spec.budget and syncs the budget labels
+// of its actor and of every actor under it. Raising the limit is how a user
+// lets a held tree run again: the Cost Service sees the new limit label and
+// removes its agent-cost/budget holds.
+func (s *Server) UpdateTaskBudget(ctx context.Context, req *v1alpha1.UpdateTaskBudgetRequest) (*v1alpha1.Task, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "missing request")
+	}
+	if err := v1alpha1.ValidateBudget(req.GetBudget()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	atespace := req.GetAtespace()
+	if atespace == "" {
+		atespace = "default"
+	}
+	taskName := req.GetName()
+
+	unlock, err := s.locker.Lock(ctx, "task", atespace, taskName)
+	if err != nil {
+		return nil, status.Errorf(codes.Aborted, "locking task %s/%s: %v", atespace, taskName, err)
+	}
+	task, err := s.store.GetTask(ctx, atespace, taskName)
+	if err != nil {
+		unlock()
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "task %q not found in atespace %q", taskName, atespace)
+		}
+		return nil, status.Errorf(codes.Internal, "getting task: %v", err)
+	}
+	if task.GetStatus().GetPhase() == v1alpha1.PhaseTerminating {
+		unlock()
+		return nil, status.Errorf(codes.FailedPrecondition, "task %s/%s is being deleted", atespace, taskName)
+	}
+	if task.Spec == nil {
+		task.Spec = &v1alpha1.TaskSpec{}
+	}
+	task.Spec.Budget = nil
+	if b := req.GetBudget(); b.GetMaxUsd() > 0 || b.GetWarnAt() > 0 || b.GetScope() != "" {
+		task.Spec.Budget = proto.Clone(b).(*v1alpha1.Budget)
+	}
+	if err := s.store.SaveTask(ctx, task); err != nil {
+		unlock()
+		return nil, status.Errorf(codes.Internal, "saving task: %v", err)
+	}
+	syncer, canSync := s.reconciler.(BudgetSyncer)
+	if canSync {
+		if synced, err := syncer.SyncBudgetLabels(ctx, task); err != nil {
+			slog.Warn("could not sync budget labels", "task", atespace+"/"+taskName, "error", err)
+		} else {
+			task.Status = synced.Status
+			if err := s.store.UpdateTaskStatus(ctx, atespace, taskName, task.Status); err != nil {
+				slog.Warn("could not store task status after a budget sync", "task", atespace+"/"+taskName, "error", err)
+			}
+		}
+	}
+	unlock()
+	s.events.TaskChanged(ctx, task)
+
+	if canSync {
+		s.syncSubtreeBudgetLabels(ctx, syncer, task)
+	}
+	return task, nil
+}
+
+// syncSubtreeBudgetLabels syncs the budget labels of every task under root,
+// each under its own lock. A task whose lock is busy is skipped: the RPC that
+// holds it reconciles the task, which syncs its labels.
+func (s *Server) syncSubtreeBudgetLabels(ctx context.Context, syncer BudgetSyncer, root *v1alpha1.Task) {
+	atespace := root.GetMetadata().GetAtespace()
+	var all []*v1alpha1.Task
+	const pageSize = 500
+	for offset := int64(0); ; offset += pageSize {
+		page, err := s.store.ListTasks(ctx, atespace, pageSize, offset)
+		if err != nil {
+			slog.Warn("listing tasks for a budget sync", "atespace", atespace, "error", err)
+			return
+		}
+		all = append(all, page...)
+		if int64(len(page)) < pageSize {
+			break
+		}
+	}
+	for _, d := range budget.Descendants(root, all) {
+		name := d.GetMetadata().GetName()
+		lockCtx, cancel := context.WithTimeout(ctx, defaultResyncLockTimeout)
+		unlock, err := s.locker.Lock(lockCtx, "task", atespace, name)
+		cancel()
+		if err != nil {
+			slog.Warn("skipping a locked task in a budget sync", "task", atespace+"/"+name, "error", err)
+			continue
+		}
+		t, err := s.store.GetTask(ctx, atespace, name)
+		if err == nil {
+			if synced, err := syncer.SyncBudgetLabels(ctx, t); err != nil {
+				slog.Warn("could not sync budget labels", "task", atespace+"/"+name, "error", err)
+			} else if err := s.store.UpdateTaskStatus(ctx, atespace, name, synced.Status); err != nil {
+				slog.Warn("could not store task status after a budget sync", "task", atespace+"/"+name, "error", err)
+			}
+		}
+		unlock()
+	}
 }
 
 func (s *Server) ListTasks(ctx context.Context, req *v1alpha1.ListTasksRequest) (*v1alpha1.ListTasksResponse, error) {
@@ -184,6 +316,7 @@ func (s *Server) ListTasks(ctx context.Context, req *v1alpha1.ListTasksRequest) 
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "listing tasks: %v", err)
 	}
+	s.refreshActorState(ctx, tasks)
 	return &v1alpha1.ListTasksResponse{Tasks: tasks}, nil
 }
 
@@ -442,6 +575,13 @@ func (s *Server) ResumeTask(ctx context.Context, req *v1alpha1.ResumeTaskRequest
 		if err != nil {
 			if reconciled != nil && reconciled.Status != nil {
 				task.Status = reconciled.Status
+			}
+			if held, ok := substrate.AsHeld(err); ok {
+				// The reconciler left the task Suspended with a Held
+				// condition; it resumes once the hold is removed.
+				_ = s.store.UpdateTaskStatus(ctx, atespace, taskName, task.Status)
+				s.events.TaskChanged(ctx, task)
+				return nil, status.Errorf(codes.FailedPrecondition, "task %s/%s cannot resume: %v", atespace, taskName, held)
 			}
 			if substrate.IsTransientError(err) {
 				task.Status.Phase = "Pending"
