@@ -569,7 +569,11 @@ type TaskStatus struct {
 	// parent_id is the unique ID (status.id) of the parent task when this task
 	// was created. A parent made again under the same name has another ID, so
 	// it does not adopt the old children.
-	ParentId      string `protobuf:"bytes,12,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	ParentId string `protobuf:"bytes,12,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	// actor_uid is the Substrate UID of the task's actor. Unlike actor, it
+	// differs between an actor and a later one made under the same name, so
+	// downstream cost joins key on it.
+	ActorUid      string `protobuf:"bytes,13,opt,name=actor_uid,json=actorUid,proto3" json:"actor_uid,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -670,6 +674,13 @@ func (x *TaskStatus) GetCreatedBy() string {
 func (x *TaskStatus) GetParentId() string {
 	if x != nil {
 		return x.ParentId
+	}
+	return ""
+}
+
+func (x *TaskStatus) GetActorUid() string {
+	if x != nil {
+		return x.ActorUid
 	}
 	return ""
 }
@@ -2590,7 +2601,7 @@ const file_pkg_apis_v1alpha1_ax_proto_rawDesc = "" +
 	"\fWorkspaceRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
-	"\x04goal\x18\x03 \x01(\tR\x04goal\"\xcd\x02\n" +
+	"\x04goal\x18\x03 \x01(\tR\x04goal\"\xea\x02\n" +
 	"\n" +
 	"TaskStatus\x12\x14\n" +
 	"\x05phase\x18\x01 \x01(\tR\x05phase\x12\x0e\n" +
@@ -2607,7 +2618,8 @@ const file_pkg_apis_v1alpha1_ax_proto_rawDesc = "" +
 	"finishedAt\x12\x1d\n" +
 	"\n" +
 	"created_by\x18\v \x01(\tR\tcreatedBy\x12\x1b\n" +
-	"\tparent_id\x18\f \x01(\tR\bparentId\"\xa6\x01\n" +
+	"\tparent_id\x18\f \x01(\tR\bparentId\x12\x1b\n" +
+	"\tactor_uid\x18\r \x01(\tR\bactorUid\"\xa6\x01\n" +
 	"\tCondition\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12;\n" +

@@ -110,7 +110,7 @@ func (m *mockControlServer) CreateActor(ctx context.Context, req *ateapipb.Creat
 	}
 	m.actorTemplateRefs[name] = req.GetActor().GetActorTemplate()
 	return &ateapipb.Actor{
-		Metadata: &ateapipb.ResourceMetadata{Name: name},
+		Metadata: &ateapipb.ResourceMetadata{Name: name, Uid: "uid-" + name},
 		Status: &ateapipb.ActorStatus{
 			State: ateapipb.ActorState_ACTOR_STATE_SUSPENDED,
 		},
@@ -273,6 +273,9 @@ func TestTaskReconciler(t *testing.T) {
 	}
 	if reconciled.Status.Actor != "test-task" {
 		t.Errorf("expected actor 'test-task', got %q", reconciled.Status.Actor)
+	}
+	if reconciled.Status.ActorUid != "uid-test-task" {
+		t.Errorf("expected actor UID 'uid-test-task', got %q", reconciled.Status.ActorUid)
 	}
 	if reconciled.Status.WorkerIp != "10.244.1.42" {
 		t.Errorf("expected worker IP '10.244.1.42', got %q", reconciled.Status.WorkerIp)

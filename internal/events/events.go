@@ -27,6 +27,7 @@ package events
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -44,6 +45,10 @@ const EventName = "ax.task.state_changed"
 // OutcomeSourceSandbox is the outcome source of every outcome ax-server
 // reports: the task command's exit code.
 const OutcomeSourceSandbox = "sandbox"
+
+// OutcomeSourceOrchestrator is the outcome source of a cancelled task:
+// ax-server decided it, not the sandbox.
+const OutcomeSourceOrchestrator = "orchestrator"
 
 // PhaseDeleted is the phase of the event sent after a task's record is
 // removed. It is not a phase that a stored task can have.
@@ -75,7 +80,43 @@ const (
 	AttrOutcomeSource = "ax.task.outcome_source"
 	AttrAteSpace      = "ate.atespace"
 	AttrActorName     = "ate.actor.name"
+	// AttrActorUID is the Substrate UID of the task's actor (status.actor_uid).
+	// Downstream cost joins key on it, because a name can be reused after a
+	// delete. It is set only once ax-server has created the actor.
+	AttrActorUID = "ate.actor.uid"
 )
+
+// Values of AttrOutcome. They are the lowercase structured outcomes of the Ax
+// task status contract; status.outcome keeps its "Completed" and "Failed"
+// values for API clients, and ax.task.phase is unchanged.
+const (
+	OutcomeSucceeded = "succeeded"
+	OutcomeFailed    = "failed"
+	// OutcomeCancelled is a task deleted before its command reported an exit.
+	OutcomeCancelled = "cancelled"
+	// OutcomeUnverified is a command that exited 0 while a goal verifier
+	// failed. ax-server runs no verifiers yet, so it does not emit it.
+	OutcomeUnverified = "unverified"
+)
+
+// Outcome returns the AttrOutcome value for task, or "" while the task has no
+// outcome.
+func Outcome(task *v1alpha1.Task) string {
+	st := task.GetStatus()
+	switch st.GetOutcome() {
+	case v1alpha1.OutcomeCompleted:
+		return OutcomeSucceeded
+	case v1alpha1.OutcomeFailed:
+		return OutcomeFailed
+	case "":
+		if p := st.GetPhase(); p == v1alpha1.PhaseTerminating || p == PhaseDeleted {
+			return OutcomeCancelled
+		}
+		return ""
+	default:
+		return strings.ToLower(st.GetOutcome())
+	}
+}
 
 // Emitter sends task lifecycle events. TaskChanged must not block on the
 // network, so an API call never waits for an export.
@@ -159,6 +200,7 @@ func Attributes(task *v1alpha1.Task) []attribute.KeyValue {
 	if atespace == "" {
 		atespace = "default"
 	}
+	outcome := Outcome(task)
 	attrs := []attribute.KeyValue{
 		attribute.String(AttrAtespace, atespace),
 		attribute.String(AttrTaskName, meta.GetName()),
@@ -168,13 +210,19 @@ func Attributes(task *v1alpha1.Task) []attribute.KeyValue {
 		attribute.String(AttrCreatedBy, st.GetCreatedBy()),
 		attribute.Float64(AttrBudgetUSD, spec.GetBudget().GetMaxUsd()),
 		attribute.String(AttrPhase, st.GetPhase()),
-		attribute.String(AttrOutcome, st.GetOutcome()),
+		attribute.String(AttrOutcome, outcome),
 		attribute.Int64(AttrExitCode, int64(st.GetExitCode())),
 		attribute.String(AttrAteSpace, atespace),
 		attribute.String(AttrActorName, meta.GetName()),
 	}
-	if st.GetOutcome() != "" {
+	if uid := st.GetActorUid(); uid != "" {
+		attrs = append(attrs, attribute.String(AttrActorUID, uid))
+	}
+	switch {
+	case st.GetOutcome() != "":
 		attrs = append(attrs, attribute.String(AttrOutcomeSource, OutcomeSourceSandbox))
+	case outcome == OutcomeCancelled:
+		attrs = append(attrs, attribute.String(AttrOutcomeSource, OutcomeSourceOrchestrator))
 	}
 	return attrs
 }

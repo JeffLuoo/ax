@@ -138,6 +138,10 @@ message TaskStatus {
   // was created. A parent made again under the same name has another ID, so
   // it does not adopt the old children.
   string parent_id = 12;
+  // actor_uid is the Substrate UID of the task's actor. Unlike actor, it
+  // differs between an actor and a later one made under the same name, so
+  // downstream cost joins key on it.
+  string actor_uid = 13;
 }
 
 message Condition {

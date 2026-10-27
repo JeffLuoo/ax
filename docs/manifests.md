@@ -60,6 +60,7 @@ After the task command exits, `status.outcome` is `Completed` (exit status 0) or
 - `status.id`: a unique ID for the task. A new task with the name of a deleted task has a different ID.
 - `status.parentId`: the `status.id` of the task that `spec.parent` names, at the time of the create.
 - `status.createdBy`: the verified name of the caller, from a Kubernetes TokenReview. It is empty when `ax-server` runs with `--auth=false`.
+- `status.actorUid`: the Substrate UID of the task's actor, set once `ax-server` has created the actor. A new actor under the same name has a different UID.
 
 ### Binding several workspaces
 

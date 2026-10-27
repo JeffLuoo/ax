@@ -34,7 +34,7 @@ func task() *v1alpha1.Task {
 		Metadata: &v1alpha1.ObjectMeta{Name: "child", Atespace: "team-a"},
 		Spec:     &v1alpha1.TaskSpec{Parent: "root", Budget: &v1alpha1.Budget{MaxUsd: 2.5}},
 		Status: &v1alpha1.TaskStatus{Phase: "Running", Outcome: v1alpha1.OutcomeFailed, ExitCode: 3,
-			Id: "task-child-1-ab", ParentId: "task-root-1-cd", CreatedBy: "alice@example.com"},
+			Id: "task-child-1-ab", ParentId: "task-root-1-cd", CreatedBy: "alice@example.com", ActorUid: "uid-child"},
 	}
 }
 
@@ -148,10 +148,11 @@ func TestNewFromEnv_SendsEventOverOTLP(t *testing.T) {
 		"ax.task.created_by": "alice@example.com",
 		"ax.task.budget_usd": 2.5,
 		"ax.task.phase":      "Running",
-		"ax.task.outcome":    "Failed",
+		"ax.task.outcome":    "failed",
 		"ax.task.exit_code":  int64(3),
 		"ate.atespace":       "team-a",
 		"ate.actor.name":     "child",
+		"ate.actor.uid":      "uid-child",
 		// The outcome is the runner's exit code, from inside the sandbox.
 		"ax.task.outcome_source": "sandbox",
 	}
@@ -179,5 +180,42 @@ func TestAttributes_RootTaskWithoutBudget(t *testing.T) {
 	}
 	if _, ok := attrs[events.AttrOutcomeSource]; ok {
 		t.Errorf("outcome source without an outcome: %v", attrs)
+	}
+	if _, ok := attrs[events.AttrActorUID]; ok {
+		t.Errorf("actor UID before the actor exists: %v", attrs)
+	}
+}
+
+func TestOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name, phase, outcome, want, wantSource string
+	}{
+		{"running", "Running", "", "", ""},
+		{"exit 0", "Running", v1alpha1.OutcomeCompleted, events.OutcomeSucceeded, events.OutcomeSourceSandbox},
+		{"exit non-zero", "Suspended", v1alpha1.OutcomeFailed, events.OutcomeFailed, events.OutcomeSourceSandbox},
+		{"deleting without exit", v1alpha1.PhaseTerminating, "", events.OutcomeCancelled, events.OutcomeSourceOrchestrator},
+		{"deleted without exit", events.PhaseDeleted, "", events.OutcomeCancelled, events.OutcomeSourceOrchestrator},
+		{"deleted after exit", events.PhaseDeleted, v1alpha1.OutcomeCompleted, events.OutcomeSucceeded, events.OutcomeSourceSandbox},
+		{"suspended without exit", "Suspended", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &v1alpha1.Task{
+				Metadata: &v1alpha1.ObjectMeta{Name: "t"},
+				Status:   &v1alpha1.TaskStatus{Phase: tc.phase, Outcome: tc.outcome},
+			}
+			if got := events.Outcome(task); got != tc.want {
+				t.Errorf("Outcome = %q, want %q", got, tc.want)
+			}
+			attrs := map[string]string{}
+			for _, kv := range events.Attributes(task) {
+				attrs[string(kv.Key)] = kv.Value.Emit()
+			}
+			if attrs[events.AttrOutcome] != tc.want {
+				t.Errorf("%s = %q, want %q", events.AttrOutcome, attrs[events.AttrOutcome], tc.want)
+			}
+			if got := attrs[events.AttrOutcomeSource]; got != tc.wantSource {
+				t.Errorf("%s = %q, want %q", events.AttrOutcomeSource, got, tc.wantSource)
+			}
+		})
 	}
 }

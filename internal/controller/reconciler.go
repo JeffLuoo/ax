@@ -230,7 +230,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, wor
 		}
 	}
 
-	_, err := r.client.EnsureActor(ctx, atespace, actorName, templateAtespace, templateName)
+	actor, err := r.client.EnsureActor(ctx, atespace, actorName, templateAtespace, templateName)
 	if err != nil {
 		if substrate.IsTransientError(err) {
 			r.setNotReady(task, "SubstrateUnavailable", err.Error(), now)
@@ -240,6 +240,9 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, task *v1alpha1.Task, wor
 		r.setNotReady(task, "ActorCreationFailed", err.Error(), now)
 		task.Status.Phase = "Failed"
 		return task, fmt.Errorf("ensuring actor: %w", err)
+	}
+	if uid := actor.GetMetadata().GetUid(); uid != "" {
+		task.Status.ActorUid = uid
 	}
 
 	// 4. Suspend or Resume the Actor
