@@ -51,7 +51,7 @@ func TestSetupWorkspace_MaidenRun(t *testing.T) {
 	defer func() { workspace.AXDir = origAXDir }()
 
 	// 1. Maiden run
-	res1, err := workspace.SetupWorkspace(context.Background(), ws, tempDir, "Test maiden run setup")
+	res1, err := workspace.SetupWorkspace(context.Background(), ws, tempDir)
 	if err != nil {
 		t.Fatalf("maiden setup failed: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSetupWorkspace_MaidenRun(t *testing.T) {
 	}
 
 	// 2. Second run (should detect already initialized)
-	res2, err := workspace.SetupWorkspace(context.Background(), ws, tempDir, "")
+	res2, err := workspace.SetupWorkspace(context.Background(), ws, tempDir)
 	if err != nil {
 		t.Fatalf("second setup failed: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestSetupWorkspace_GitSubdir(t *testing.T) {
 	workspace.AXDir = stateDir
 	defer func() { workspace.AXDir = origAXDir }()
 
-	res, err := workspace.SetupWorkspace(context.Background(), ws, tempDir, "")
+	res, err := workspace.SetupWorkspace(context.Background(), ws, tempDir)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestSetupWorkspace_GitError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	_, _ = workspace.SetupWorkspace(ctx, ws, tempDir, "")
+	_, _ = workspace.SetupWorkspace(ctx, ws, tempDir)
 
 	// Verify git-error.log is created under stateDir and NOT inside workspace
 	errLog := filepath.Join(stateDir, "git-error.log")
@@ -248,7 +248,7 @@ echo '3' > file.txt && git add . && git commit -m 'commit 3'
 	workspace.AXDir = stateDir
 	defer func() { workspace.AXDir = origAXDir }()
 
-	res, err := workspace.SetupWorkspace(context.Background(), ws, tempDir, "")
+	res, err := workspace.SetupWorkspace(context.Background(), ws, tempDir)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestSetupWorkspace_InlinedFiles(t *testing.T) {
 	workspace.AXDir = stateDir
 	defer func() { workspace.AXDir = origAXDir }()
 
-	res, err := workspace.SetupWorkspace(context.Background(), ws, tempDir, "")
+	res, err := workspace.SetupWorkspace(context.Background(), ws, tempDir)
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestSetupIn_MarkerOnTheDurableVolumeSurvivesAResume(t *testing.T) {
 		Metadata: &v1alpha1.ObjectMeta{Name: "durable"},
 		Spec:     &v1alpha1.WorkspaceSpec{Git: []*v1alpha1.GitRepo{{Name: "code", Repo: initSourceRepo(t)}}},
 	}
-	first, err := workspace.SetupIn(context.Background(), ws, volume, "", stateDir)
+	first, err := workspace.SetupIn(context.Background(), ws, volume, stateDir)
 	if err != nil || !first.IsMaidenRun {
 		t.Fatalf("first boot: %+v, %v", first, err)
 	}
@@ -364,7 +364,7 @@ func TestSetupIn_MarkerOnTheDurableVolumeSurvivesAResume(t *testing.T) {
 	if err := os.WriteFile(edited, []byte("agent work\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second, err := workspace.SetupIn(context.Background(), ws, volume, "", stateDir)
+	second, err := workspace.SetupIn(context.Background(), ws, volume, stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestSetupIn_ExcludesTheStateDirFromARepoAtTheRoot(t *testing.T) {
 		Metadata: &v1alpha1.ObjectMeta{Name: "root-repo"},
 		Spec:     &v1alpha1.WorkspaceSpec{Git: []*v1alpha1.GitRepo{{Repo: initSourceRepo(t), Dir: "."}}},
 	}
-	if _, err := workspace.SetupIn(context.Background(), ws, volume, "", stateDir); err != nil {
+	if _, err := workspace.SetupIn(context.Background(), ws, volume, stateDir); err != nil {
 		t.Fatal(err)
 	}
 	status := exec.Command("git", "status", "--porcelain")
@@ -401,7 +401,7 @@ func TestSetupIn_ExcludesTheStateDirFromARepoAtTheRoot(t *testing.T) {
 	if err := os.Remove(filepath.Join(stateDir, workspace.MarkerName(volume))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := workspace.SetupIn(context.Background(), ws, volume, "", stateDir); err != nil {
+	if _, err := workspace.SetupIn(context.Background(), ws, volume, stateDir); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(volume, ".git", "info", "exclude"))
@@ -421,7 +421,7 @@ func TestSetupIn_LeavesOtherReposExcludeAlone(t *testing.T) {
 		Metadata: &v1alpha1.ObjectMeta{Name: "sub-repo"},
 		Spec:     &v1alpha1.WorkspaceSpec{Git: []*v1alpha1.GitRepo{{Name: "code", Repo: initSourceRepo(t)}}},
 	}
-	if _, err := workspace.SetupIn(context.Background(), ws, volume, "", filepath.Join(volume, ".ax")); err != nil {
+	if _, err := workspace.SetupIn(context.Background(), ws, volume, filepath.Join(volume, ".ax")); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(filepath.Join(volume, "code", ".git", "info", "exclude"))

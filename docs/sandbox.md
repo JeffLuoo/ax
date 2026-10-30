@@ -4,10 +4,10 @@ Every task container starts with `ax-task-runner` as PID 1. On boot it:
 
 1. Loads the `Task` and every bound `Workspace` spec.
 2. Starts its servers: probes and guest management on port 80, and the metadata endpoints on `127.0.0.1:8099`.
-3. On the first run, prepares each workspace at its own path, in binding order: clones Git repos, sets up the skills path, and, if the binding has a goal, hands that goal to an Antigravity agent to finish environment setup. The agent needs `GEMINI_API_KEY` in the container and gets 10 minutes by default; set `AX_BOOTSTRAP_TIMEOUT` to a Go duration to change that. The task reports not-ready until every workspace, including any agent run, has finished.
+3. On the first run, prepares each workspace at its own path, in binding order: clones Git repos and sets up the skills path. The task reports not-ready until every workspace has finished.
 4. Starts `spec.command` as a child process, with the first workspace as its working directory and `AX_METADATA_URL` plus `spec.env` in its environment, and supervises it.
 
-The runner stays up as PID 1 whether or not the command is still running, so the metadata server keeps answering and `ax ssh` still works after the command has exited. Its exit code is logged and written to `/workspace/.ax/command-exit.json` on the durable volume. After a resume, the runner finds that file, serves the stored exit at `/statusz`, and does not set up the workspaces or start the command again. A command that the runner stopped for a suspend has no such file, so it starts again after the resume. When the sandbox is stopped or suspended, the runner sends the command's process group `SIGTERM`, waits ten seconds, and then kills whatever is left.
+The runner stays up as PID 1 whether or not the command is still running, so the metadata server keeps answering and `ax ssh` still works after the command has exited. Its exit code is logged and written to `/workspace/.ax/command-exit.json` on the durable volume. After a resume, the runner finds that file, serves the stored exit at `/statusz`, and does not set up the workspace or start the command again. A command that the runner stopped for a suspend has no such file, so it starts again after the resume. When the sandbox is stopped or suspended, the runner sends the command's process group `SIGTERM`, waits ten seconds, and then kills whatever is left.
 
 The task command, and any repository that a workspace clones, can write `/workspace/.ax`. So the agent can write its own exit record, and the outcome that `ax-server` records is what the sandbox reports, not a verified result. The task event carries `ax.task.outcome_source=sandbox` to show this. The runner checks the record before it uses it: the file must hold only `exitCode` and `finishedAt`, the exit code must be from -1 to 255, and the finish time must be set and not more than one minute in the future. The runner logs an error, ignores a record that fails the check, and starts the command.
 
@@ -28,7 +28,7 @@ Your agent can introspect its own configuration without any SDK. The metadata en
 | Endpoint | Method | Returns | Description |
 |---|---|---|---|
 | `/metadata/v1alpha1/ax/task` | `GET` | `application/yaml` | Task launch configuration, excluding status. |
-| `/metadata/v1alpha1/ax/workspaces` | `GET` | `application/yaml` | Every bound `Workspace`, as a multi-document stream in binding order. |
+| `/metadata/v1alpha1/ax/workspace` | `GET` | `application/yaml` | The bound `Workspace`. `404` when the task binds none. |
 
 ```bash
 # From inside a task:

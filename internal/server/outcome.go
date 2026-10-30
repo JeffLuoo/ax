@@ -24,7 +24,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/ax/internal/controller"
 	"github.com/google/ax/pkg/apis/v1alpha1"
+	ateapipb "go.ate.dev/substrate/api/ateapi/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -48,15 +50,17 @@ const (
 
 // OutcomePollerOptions configures RunOutcomePoller.
 type OutcomePollerOptions struct {
-	// RouterAddr is the atenet router's host:port. The router sends a request
-	// to the actor that the ate-target-actor header names.
+	// RouterAddr is the atenet router's address: a URL, or a host:port where
+	// port 443 means https. The router sends a request to the actor that the
+	// ate-target-actor header names.
 	RouterAddr string
 	// Interval is the time between polls; zero means DefaultOutcomePollInterval.
 	Interval time.Duration
 	// Concurrency bounds the requests in flight; zero means
 	// DefaultOutcomePollConcurrency.
 	Concurrency int
-	// HTTPClient sends the requests; nil means a client with a 2 s timeout.
+	// HTTPClient sends the requests; nil means controller.NewRouterHTTPClient,
+	// which has a 2 s timeout and the router's mTLS credentials.
 	HTTPClient *http.Client
 }
 
@@ -96,6 +100,10 @@ func (s *Server) RunOutcomePoller(ctx context.Context, opts OutcomePollerOptions
 // and sets the outcome when the command has exited. It returns how many
 // outcomes it set.
 //
+// A stored task is never Running: the phase follows from the task's actor, as
+// GetTask reports it. So PollOutcomes reads the actors to find the running
+// tasks, and reads the actor again under the task's lock before it asks.
+//
 // It never asks about a task that is not Running: the router resumes a
 // suspended actor to answer, and that would undo a suspend. It holds the
 // task's lock from the check of the phase until the outcome is saved, so a
@@ -103,29 +111,14 @@ func (s *Server) RunOutcomePoller(ctx context.Context, opts OutcomePollerOptions
 func (s *Server) PollOutcomes(ctx context.Context, opts OutcomePollerOptions) int {
 	client := opts.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Second}
+		client = controller.NewRouterHTTPClient()
 	}
 	workers := opts.Concurrency
 	if workers <= 0 {
 		workers = DefaultOutcomePollConcurrency
 	}
 
-	var candidates []*v1alpha1.Task
-	for offset := int64(0); ; offset += outcomeListPage {
-		page, err := s.store.ListTasks(ctx, "", outcomeListPage, offset)
-		if err != nil {
-			slog.Warn("listing tasks for outcome poll", "error", err)
-			return 0
-		}
-		for _, t := range page {
-			if t.GetStatus().GetPhase() == "Running" && t.GetStatus().GetOutcome() == "" {
-				candidates = append(candidates, t)
-			}
-		}
-		if len(page) < outcomeListPage {
-			break
-		}
-	}
+	candidates := s.runningTasksWithoutOutcome(ctx)
 
 	var (
 		wg   sync.WaitGroup
@@ -153,6 +146,55 @@ func (s *Server) PollOutcomes(ctx context.Context, opts OutcomePollerOptions) in
 	return set
 }
 
+// runningTasksWithoutOutcome returns the tasks that GetTask reports as
+// Running and that have no outcome. It reads the stored tasks one page at a
+// time, then the actors with one ListActors call for each atespace. GetTask
+// reports a task whose stored phase is one of AX's own (Pending, Failed, or
+// Terminating) with that phase, so such a task is not a candidate.
+func (s *Server) runningTasksWithoutOutcome(ctx context.Context) []*v1alpha1.Task {
+	byAtespace := map[string][]*v1alpha1.Task{}
+	for offset := int64(0); ; offset += outcomeListPage {
+		page, err := s.storedTasks(ctx, "", outcomeListPage, offset)
+		if err != nil {
+			slog.Warn("listing tasks for outcome poll", "error", err)
+			return nil
+		}
+		for _, t := range page {
+			if t.GetStatus().GetOutcome() != "" || v1alpha1.IsAXPhase(t.GetStatus().GetPhase()) {
+				continue
+			}
+			ns := t.GetMetadata().GetAtespace()
+			if ns == "" {
+				ns = "default"
+			}
+			byAtespace[ns] = append(byAtespace[ns], t)
+		}
+		if len(page) < outcomeListPage {
+			break
+		}
+	}
+
+	var running []*v1alpha1.Task
+	for ns, group := range byAtespace {
+		actors, err := s.substrate.ListActors(ctx, ns)
+		if err != nil {
+			slog.Warn("listing actors for outcome poll", "atespace", ns, "error", err)
+			continue
+		}
+		byName := make(map[string]*ateapipb.Actor, len(actors))
+		for _, a := range actors {
+			byName[a.GetMetadata().GetName()] = a
+		}
+		for _, t := range group {
+			a, ok := byName[t.GetMetadata().GetName()]
+			if ok && actorPhase(a.GetStatus().GetState()) == v1alpha1.PhaseRunning {
+				running = append(running, t)
+			}
+		}
+	}
+	return running
+}
+
 // checkOutcome asks one task's runner for its command state and records an
 // exit. It reports whether it set the outcome.
 func (s *Server) checkOutcome(ctx context.Context, client *http.Client, routerAddr, atespace, name string) bool {
@@ -168,23 +210,25 @@ func (s *Server) checkOutcome(ctx context.Context, client *http.Client, routerAd
 	}
 	defer unlock()
 
-	// The phase may have changed since the list; only the stored task counts.
-	task, err := s.store.GetTask(ctx, atespace, name)
-	if err != nil || task.GetStatus().GetPhase() != "Running" || task.GetStatus().GetOutcome() != "" {
+	// The phase may have changed since the list; only the task as GetTask
+	// reports it now, with its actor read under the lock, counts.
+	task, err := s.getTask(ctx, atespace, name)
+	if err != nil || task.GetStatus().GetPhase() != v1alpha1.PhaseRunning || task.GetStatus().GetOutcome() != "" {
 		return false
 	}
 	return s.recordOutcomeLocked(ctx, client, routerAddr, task, 0)
 }
 
 // recordFinalOutcome asks the runner of a Running task with no outcome for
-// its command state once, and records an exit in task and in the store.
+// its command state once, and records an exit in task and in the store. task
+// comes from getTask, so its phase follows from its actor.
 // SuspendTask and DeleteTask call it while they hold the task's lock, before
 // they act: after a suspend the poller does not ask, and after a delete
 // there is no runner to ask. A command that exited after the last poll
 // otherwise loses its outcome. It does nothing when no router is set, and a
 // failed request does not stop the caller.
 func (s *Server) recordFinalOutcome(ctx context.Context, task *v1alpha1.Task) {
-	if s.routerAddr == "" || task.GetStatus().GetPhase() != "Running" || task.GetStatus().GetOutcome() != "" {
+	if s.routerAddr == "" || task.GetStatus().GetPhase() != v1alpha1.PhaseRunning || task.GetStatus().GetOutcome() != "" {
 		return
 	}
 	s.recordOutcomeLocked(ctx, s.routerClient, s.routerAddr, task, finalOutcomeTimeout)
@@ -192,7 +236,7 @@ func (s *Server) recordFinalOutcome(ctx context.Context, task *v1alpha1.Task) {
 
 // recordOutcomeLocked asks task's runner for its command state and records
 // an exit in task and in the store. The caller holds the task's lock and has
-// checked that the stored task is Running and has no outcome. A timeout
+// checked, with the task's actor, that the task is Running and has no outcome. A timeout
 // greater than zero bounds the request; the store write does not count
 // against it. It reports whether it set the outcome.
 func (s *Server) recordOutcomeLocked(ctx context.Context, client *http.Client, routerAddr string, task *v1alpha1.Task, timeout time.Duration) bool {
@@ -226,7 +270,7 @@ func (s *Server) recordOutcomeLocked(ctx context.Context, client *http.Client, r
 	task.Status.Outcome = v1alpha1.OutcomeForExitCode(code)
 	task.Status.ExitCode = code
 	task.Status.FinishedAt = timestamppb.New(finished)
-	if err := s.store.UpdateTaskStatus(ctx, atespace, name, task.Status); err != nil {
+	if err := s.updateTask(ctx, atespace, name, task.Status); err != nil {
 		slog.Warn("saving task outcome", "task", atespace+"/"+name, "error", err)
 		return false
 	}
@@ -239,7 +283,7 @@ func (s *Server) recordOutcomeLocked(ctx context.Context, client *http.Client, r
 // router, which routes on the ate-target-actor header. The actor is named
 // after the task.
 func fetchStatusz(ctx context.Context, client *http.Client, routerAddr, atespace, name string) (*statusz, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s/statusz", routerAddr), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, controller.RouterURL(routerAddr, "/statusz"), nil)
 	if err != nil {
 		return nil, err
 	}

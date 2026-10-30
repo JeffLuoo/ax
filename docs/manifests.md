@@ -4,6 +4,8 @@ All four kinds can live in one multi-document YAML file. See [`examples/task.yam
 
 `metadata.name` and `metadata.atespace` become Substrate resource names, so they must be lowercase RFC 1123 labels: at most 63 lowercase alphanumeric characters or `-`, starting and ending with an alphanumeric character. `ax apply` rejects anything else up front rather than letting the task fail later with `ActorCreationFailed`.
 
+When `metadata.atespace` is omitted, `ax apply -a team-a -f manifest.yaml` uses `team-a`. Without `-a` or `--atespace`, the manifest's atespace is preserved, or defaults to `default` if omitted. If an explicit flag disagrees with `metadata.atespace`, that resource is rejected before it is submitted.
+
 ## Task
 
 ```yaml
@@ -20,17 +22,13 @@ spec:
       value: "production"
 
   resources:
-    requests:
-      cpu: "500m"
-      memory: "1Gi"
     limits:
       cpu: "2"
       memory: "4Gi"
 
-  workspaces:
-    - name: default-workspace
-      path: "/workspace"
-      goal: "Install dependencies and run the test suite"   # Antigravity prepares the workspace to this goal on first run
+  workspace:
+    name: default-workspace
+    path: "/workspace"   # optional; this is the default
 
   debug: true   # serve guest services inside the sandbox so `ax ssh` works; off by default
 
@@ -45,10 +43,6 @@ spec:
 
 `spec.budget.maxUsd` is the spending limit that the task declares, in US dollars. It must be a finite number of 0 or more; 0 means no limit. AX stores the budget and sends it, with the parent, to an OpenTelemetry Collector in the `ax.task.state_changed` event for downstream joins. `ax cost task <name>` rolls up the task tree from AX's stored tasks and shows the spend against the budget. AX does not stop a task that spends more than its budget.
 
-### Sandbox size
-
-`spec.resources.limits` sets the size of the sandbox: AX writes the CPU and memory limits into the task's Agent Substrate actor template, and Substrate books that size on a worker. When `limits` is not set, AX uses `requests`. When neither is set, AX uses the defaults of `ax-server` (`--default-task-cpu`, default `1`, and `--default-task-memory`, default `2Gi`). The values are Kubernetes quantities, for example `500m`, `2`, or `4Gi`, and they must be greater than zero. An existing actor keeps the size of the template that it was created from, so a new default does not change a task that exists. See [Upgrading](upgrading.md).
-
 ### Outcome
 
 After the task command exits, `status.outcome` is `Completed` (exit status 0) or `Failed` (any other status), with `status.exitCode` and `status.finishedAt`. The runner in the sandbox reports the exit, so the outcome is what the sandbox says. The runner keeps the exit on the durable volume and does not start the command again after a resume. The agent can write that record, so do not use the outcome as proof that the task succeeded.
@@ -62,20 +56,37 @@ After the task command exits, `status.outcome` is `Completed` (exit status 0) or
 - `status.createdBy`: the verified name of the caller, from a Kubernetes TokenReview. It is empty when `ax-server` runs with `--auth=false`.
 - `status.actorUid`: the Substrate UID of the task's actor, set once `ax-server` has created the actor. A new actor under the same name has a different UID.
 
-### Binding several workspaces
+### Image references
 
-`spec.workspaces` takes as many entries as you like, so a task can compose reusable `Workspace` resources, for example the code to work on plus a shared set of tools:
+Substrate requires `spec.image` to be pinned by digest, e.g. `ghcr.io/my-org/my-agent-image@sha256:...`. A tag-only reference such as `my-agent:v1` is rejected when the task's ActorTemplate is created, because a tag can move and would silently invalidate the actor's snapshots. If that happens the task reports `Ready=False` with reason `TemplateCreationFailed` and the Substrate error as the message. Resolve a tag to its digest with `docker buildx imagetools inspect <image:tag>` or `crane digest <image:tag>`.
 
-```yaml
-spec:
-  workspaces:
-    - name: my-service          # mounted at /workspace/my-service, the command's working directory
-      goal: "Install dependencies and run the test suite"
-    - name: team-tools
-      path: "/workspace/tools"  # explicit mount path
+### Binding a workspace
+
+A task binds at most one `Workspace` through `spec.workspace`. The binding needs a `name`; without a `path` the workspace is mounted at `/workspace`. That path is the working directory of `spec.command`, and the task reports `WorkspaceReady` once the workspace is prepared. A task with no `workspace` gets an empty working directory at `/workspace`.
+
+To work on content from several sources, put it all in one `Workspace`, for example by listing several repositories under `spec.git` or adding files through `spec.files`.
+
+### Sizing the sandbox
+
+`spec.resources.limits` caps the CPU and memory of the task's sandbox. The controller copies the limits onto the Substrate `ActorTemplate` it provisions for the task, using Kubernetes quantity syntax (`500m`, `2`, `4Gi`). Only `cpu` and `memory` are supported, each quantity must be greater than zero, and the CPU limit must be below 1000 cores. `ax apply` rejects values outside these rules, and a task whose limits Substrate refuses is marked `Failed` with reason `TemplateCreationFailed` rather than run without them. Because Substrate requires both CPU and memory limits on every `ActorTemplate`, any omitted dimension defaults to `1` CPU (`1000m`) and `512Mi` memory.
+
+Substrate sizes sandboxes by limits alone, so `spec.resources.requests` is not supported and `ax apply` rejects a manifest that sets it.
+
+An existing actor keeps the template that it was created from. A new version of `ax-server` that changes the template of a task does not resize the task's existing actor. See [Upgrading](upgrading.md).
+
+### Runner configuration
+
+`spec.config` is an arbitrary YAML object of per-task settings for the task's [runner](runner.md) or command. AX stores it and hands it over unchanged as part of the `Task`, both in `AX_TASK_YAML` and from the `/metadata/v1alpha1/ax/task` endpoint, so one runner image can serve many tasks that differ only in their settings. Nested maps and lists are kept as they are, instead of being flattened into `spec.env` strings.
+
+The control plane does not interpret `spec.config`; its schema belongs to the runner. `ax apply` only rejects a config that is not an object or whose JSON encoding exceeds 16 KiB. The whole task, config included, must also stay under 31 KiB once encoded as YAML, because it reaches the runner in a single environment variable and Substrate caps each value at 32 KiB. Numbers are stored as JSON numbers (double precision), so quote large integers or IDs that must survive exactly. Like the rest of the spec, the config is immutable once the task is created: changing it means creating a new task.
+
+`spec.config` is stored in plain text and shown by `ax get task` and `ax describe task`, so don't put credentials in it. Use secrets instead, for example `Model.spec.secretKey`.
+
+Inside the task, the command can read its config through the metadata server:
+
+```bash
+curl -s "$AX_METADATA_URL/metadata/v1alpha1/ax/task" | yq .spec.config
 ```
-
-Each entry is set up independently at its own path, in order. Every entry needs a `name`; without a `path` it lands at `/workspace/<name>`, and paths must be unique. The first entry is the working directory of `spec.command`, and the task reports `WorkspaceReady` only once all of them are prepared. See [`examples/multi-workspace.yaml`](../examples/multi-workspace.yaml) for a complete set.
 
 ## Workspace
 

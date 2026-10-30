@@ -28,7 +28,10 @@ import (
 	"github.com/google/ax/internal/lock"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store/memory"
+	"github.com/google/ax/internal/substrate/substratetest"
 	"github.com/google/ax/pkg/apis/v1alpha1"
+	ateapipb "go.ate.dev/substrate/api/ateapi/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // fakeRouter stands in for the atenet router: it answers GET /statusz for the
@@ -75,24 +78,62 @@ func (f *fakeRouter) askedFor(actor string) bool {
 	return false
 }
 
-func saveTask(t *testing.T, ms *memory.MemoryStore, atespace, name, phase, outcome string) {
+// saveTask stores a task that GetTask reports with phase. The store keeps
+// only the phases of AX's own (Pending, Failed, Terminating); for the others,
+// the task's actor on sub gets the matching state.
+func saveTask(t *testing.T, ms *memory.MemoryStore, sub *substratetest.Server, atespace, name, phase, outcome string) {
 	t.Helper()
-	if err := ms.SaveTask(context.Background(), &v1alpha1.Task{
+	stored := ""
+	state := ateapipb.ActorState_ACTOR_STATE_SUSPENDED
+	switch phase {
+	case v1alpha1.PhaseRunning:
+		state = ateapipb.ActorState_ACTOR_STATE_RUNNING
+	case v1alpha1.PhaseSuspended:
+	default:
+		stored = phase
+	}
+	storeTask(t, ms, &v1alpha1.Task{
 		Metadata: &v1alpha1.ObjectMeta{Name: name, Atespace: atespace},
 		Spec:     &v1alpha1.TaskSpec{Parent: "", Budget: &v1alpha1.Budget{MaxUsd: 1}},
-		Status:   &v1alpha1.TaskStatus{Phase: phase, Outcome: outcome},
-	}); err != nil {
+		Status:   &v1alpha1.TaskStatus{Phase: stored, Outcome: outcome},
+	})
+	setActorState(sub, atespace, name, state)
+}
+
+// storeTask stores task with its status as given. The store saves an empty
+// phase as Pending, so storeTask writes the status again.
+func storeTask(t *testing.T, ms *memory.MemoryStore, task *v1alpha1.Task) {
+	t.Helper()
+	ctx := context.Background()
+	st := proto.Clone(task.GetStatus()).(*v1alpha1.TaskStatus)
+	if err := ms.SaveTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.UpdateTaskStatus(ctx, task.GetMetadata().GetAtespace(), task.GetMetadata().GetName(), st); err != nil {
 		t.Fatal(err)
 	}
 }
 
+// setActorState gives the named actor on sub the given state, as Substrate
+// can change an actor without AX.
+func setActorState(sub *substratetest.Server, atespace, name string, state ateapipb.ActorState) {
+	sub.SetActor(&ateapipb.Actor{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: atespace, Name: name},
+		Status:   &ateapipb.ActorStatus{State: state},
+	})
+}
+
 func TestPollOutcomes_SetsOutcomeOfExitedRunningTasks(t *testing.T) {
 	ms := memory.NewStore()
-	saveTask(t, ms, "team-a", "done", "Running", "")
-	saveTask(t, ms, "team-a", "broken", "Running", "")
-	saveTask(t, ms, "team-a", "busy", "Running", "")
-	saveTask(t, ms, "team-a", "asleep", "Suspended", "")
-	saveTask(t, ms, "team-a", "settled", "Running", v1alpha1.OutcomeCompleted)
+	sub := substratetest.NewServer(t)
+	saveTask(t, ms, sub, "team-a", "done", "Running", "")
+	saveTask(t, ms, sub, "team-a", "broken", "Running", "")
+	saveTask(t, ms, sub, "team-a", "busy", "Running", "")
+	saveTask(t, ms, sub, "team-a", "asleep", "Suspended", "")
+	saveTask(t, ms, sub, "team-a", "settled", "Running", v1alpha1.OutcomeCompleted)
+	saveTask(t, ms, sub, "team-a", "failing", v1alpha1.PhaseFailed, "")
+	// The actor runs, but the stored phase Failed is what GetTask reports.
+	setActorState(sub, "team-a", "failing", ateapipb.ActorState_ACTOR_STATE_RUNNING)
 
 	router := &fakeRouter{states: map[string]string{
 		"team-a/done":    `{"state":"exited","exitCode":0,"finishedAt":"2026-10-18T08:30:00Z"}`,
@@ -100,18 +141,14 @@ func TestPollOutcomes_SetsOutcomeOfExitedRunningTasks(t *testing.T) {
 		"team-a/busy":    `{"state":"running"}`,
 		"team-a/asleep":  `{"state":"exited","exitCode":0,"finishedAt":"2026-10-18T08:32:00Z"}`,
 		"team-a/settled": `{"state":"exited","exitCode":9,"finishedAt":"2026-10-18T08:33:00Z"}`,
+		"team-a/failing": `{"state":"exited","exitCode":0,"finishedAt":"2026-10-18T08:34:00Z"}`,
 	}}
 	hs := httptest.NewServer(router)
 	defer hs.Close()
 
 	rec := &recordingEmitter{}
-	srv := server.NewServer(ms, server.Options{Events: rec})
+	srv := server.NewServer(ms, newTestReconciler(sub), server.Options{Events: rec})
 	ctx := context.Background()
-	watch, closer, err := ms.WatchTask(ctx, "team-a", "done")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer closer.Close()
 
 	opts := server.OutcomePollerOptions{RouterAddr: strings.TrimPrefix(hs.URL, "http://")}
 	if n := srv.PollOutcomes(ctx, opts); n != 2 {
@@ -126,13 +163,17 @@ func TestPollOutcomes_SetsOutcomeOfExitedRunningTasks(t *testing.T) {
 		"done":   {v1alpha1.OutcomeCompleted, 0, "2026-10-18T08:30:00Z"},
 		"broken": {v1alpha1.OutcomeFailed, 7, "2026-10-18T08:31:00Z"},
 	} {
-		got, err := ms.GetTask(ctx, "team-a", name)
+		got, err := srv.GetTask(ctx, &v1alpha1.GetTaskRequest{Atespace: "team-a", Name: name})
 		if err != nil {
 			t.Fatal(err)
 		}
 		st := got.GetStatus()
 		if st.GetOutcome() != want.outcome || st.GetExitCode() != want.code || st.GetFinishedAt().AsTime().Format(time.RFC3339) != want.at || st.GetPhase() != "Running" {
 			t.Errorf("%s status = %v, want outcome %s exit %d at %s", name, st, want.outcome, want.code, want.at)
+		}
+		stored, err := ms.GetTask(ctx, "team-a", name)
+		if err != nil || stored.GetStatus().GetOutcome() != want.outcome || stored.GetStatus().GetPhase() != "" {
+			t.Errorf("%s stored status = %v, %v, want outcome %s and no phase", name, stored.GetStatus(), err, want.outcome)
 		}
 	}
 	if got, _ := ms.GetTask(ctx, "team-a", "busy"); got.GetStatus().GetOutcome() != "" {
@@ -148,19 +189,18 @@ func TestPollOutcomes_SetsOutcomeOfExitedRunningTasks(t *testing.T) {
 	if router.askedFor("team-a/settled") {
 		t.Error("the poller asked about a task that already has an outcome")
 	}
-
-	// Watchers see the update, and a task event is emitted with the outcome.
-	select {
-	case w := <-watch:
-		if w.GetStatus().GetOutcome() != v1alpha1.OutcomeCompleted {
-			t.Errorf("watch event = %v", w.GetStatus())
-		}
-	case <-time.After(2 * time.Second):
-		t.Error("no watch event for the outcome")
+	if router.askedFor("team-a/failing") {
+		t.Error("the poller asked about a task whose stored phase is Failed")
 	}
+
+	// A task event is emitted with the outcome and the phase that GetTask
+	// reports.
 	outcomes := map[string]string{}
 	for _, e := range rec.events {
 		outcomes[e.GetMetadata().GetName()] = e.GetStatus().GetOutcome()
+		if e.GetStatus().GetPhase() != "Running" {
+			t.Errorf("event for %s has phase %q, want Running", e.GetMetadata().GetName(), e.GetStatus().GetPhase())
+		}
 	}
 	if len(rec.events) != 2 || outcomes["done"] != v1alpha1.OutcomeCompleted || outcomes["broken"] != v1alpha1.OutcomeFailed {
 		t.Errorf("events = %v, want one for each outcome", outcomes)
@@ -174,14 +214,15 @@ func TestPollOutcomes_SetsOutcomeOfExitedRunningTasks(t *testing.T) {
 
 func TestPollOutcomes_WaitsForTheTaskLockAndRechecksThePhase(t *testing.T) {
 	ms := memory.NewStore()
-	saveTask(t, ms, "default", "racer", "Running", "")
+	sub := substratetest.NewServer(t)
+	saveTask(t, ms, sub, "default", "racer", "Running", "")
 	router := &fakeRouter{states: map[string]string{
 		"default/racer": `{"state":"exited","exitCode":0,"finishedAt":"2026-10-18T08:30:00Z"}`,
 	}}
 	hs := httptest.NewServer(router)
 	defer hs.Close()
 	locker := lock.NewMemoryLocker()
-	srv := server.NewServer(ms, server.Options{Locker: locker})
+	srv := server.NewServer(ms, newTestReconciler(sub), server.Options{Locker: locker})
 
 	// A suspend holds the lock while the poller starts.
 	ctx := context.Background()
@@ -194,7 +235,7 @@ func TestPollOutcomes_WaitsForTheTaskLockAndRechecksThePhase(t *testing.T) {
 		done <- srv.PollOutcomes(ctx, server.OutcomePollerOptions{RouterAddr: strings.TrimPrefix(hs.URL, "http://")})
 	}()
 	time.Sleep(100 * time.Millisecond)
-	saveTask(t, ms, "default", "racer", "Suspended", "")
+	setActorState(sub, "default", "racer", ateapipb.ActorState_ACTOR_STATE_SUSPENDED)
 	unlock()
 
 	if n := <-done; n != 0 {
@@ -207,18 +248,19 @@ func TestPollOutcomes_WaitsForTheTaskLockAndRechecksThePhase(t *testing.T) {
 
 func TestPollOutcomes_BoundsConcurrencyAndIgnoresBadAnswers(t *testing.T) {
 	ms := memory.NewStore()
+	sub := substratetest.NewServer(t)
 	states := map[string]string{}
 	for i := range 6 {
 		name := fmt.Sprintf("t%d", i)
-		saveTask(t, ms, "default", name, "Running", "")
+		saveTask(t, ms, sub, "default", name, "Running", "")
 		states["default/"+name] = `{"state":"exited","exitCode":0}`
 	}
-	saveTask(t, ms, "default", "garbage", "Running", "")
+	saveTask(t, ms, sub, "default", "garbage", "Running", "")
 	states["default/garbage"] = `{not json`
 	router := &fakeRouter{states: states, delay: 50 * time.Millisecond}
 	hs := httptest.NewServer(router)
 	defer hs.Close()
-	srv := server.NewServer(ms)
+	srv := server.NewServer(ms, newTestReconciler(sub))
 
 	n := srv.PollOutcomes(context.Background(), server.OutcomePollerOptions{RouterAddr: strings.TrimPrefix(hs.URL, "http://"), Concurrency: 2})
 	if n != 6 {
@@ -237,7 +279,7 @@ func TestPollOutcomes_BoundsConcurrencyAndIgnoresBadAnswers(t *testing.T) {
 }
 
 func TestRunOutcomePoller_StopsWithContext(t *testing.T) {
-	srv := server.NewServer(memory.NewStore())
+	srv := server.NewServer(memory.NewStore(), newTestReconciler(substratetest.NewServer(t)))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -257,11 +299,12 @@ func TestRunOutcomePoller_StopsWithContext(t *testing.T) {
 
 func TestSuspendAndDelete_RecordTheOutcomeBeforeTheyAct(t *testing.T) {
 	ms := memory.NewStore()
-	saveTask(t, ms, "team-a", "quick", "Running", "")
-	saveTask(t, ms, "team-a", "brief", "Running", "")
-	saveTask(t, ms, "team-a", "busy", "Running", "")
-	saveTask(t, ms, "team-a", "asleep", "Suspended", "")
-	saveTask(t, ms, "team-a", "unknown", "Running", "")
+	sub := substratetest.NewServer(t)
+	saveTask(t, ms, sub, "team-a", "quick", "Running", "")
+	saveTask(t, ms, sub, "team-a", "brief", "Running", "")
+	saveTask(t, ms, sub, "team-a", "busy", "Running", "")
+	saveTask(t, ms, sub, "team-a", "asleep", "Suspended", "")
+	saveTask(t, ms, sub, "team-a", "unknown", "Running", "")
 	router := &fakeRouter{states: map[string]string{
 		"team-a/quick":  `{"state":"exited","exitCode":4,"finishedAt":"2026-10-18T08:30:00Z"}`,
 		"team-a/brief":  `{"state":"exited","exitCode":0,"finishedAt":"2026-10-18T08:31:00Z"}`,
@@ -271,7 +314,7 @@ func TestSuspendAndDelete_RecordTheOutcomeBeforeTheyAct(t *testing.T) {
 	hs := httptest.NewServer(router)
 	defer hs.Close()
 	rec := &recordingEmitter{}
-	srv := server.NewServer(ms, server.Options{Events: rec, RouterAddr: strings.TrimPrefix(hs.URL, "http://")})
+	srv := server.NewServer(ms, newTestReconciler(sub), server.Options{Events: rec, RouterAddr: strings.TrimPrefix(hs.URL, "http://")})
 	ctx := context.Background()
 
 	// A command that exited before the suspend keeps its outcome.
@@ -300,6 +343,13 @@ func TestSuspendAndDelete_RecordTheOutcomeBeforeTheyAct(t *testing.T) {
 	if deleted.GetStatus().GetOutcome() != v1alpha1.OutcomeCompleted || deleted.GetStatus().GetExitCode() != 0 {
 		t.Errorf("delete event = %v, want outcome Completed", deleted.GetStatus())
 	}
+	// The outcome event, before the delete, has the phase that GetTask
+	// reported: the actor was running.
+	for _, e := range rec.events {
+		if e.GetMetadata().GetName() == "brief" && e.GetStatus().GetPhase() != "Running" && e.GetStatus().GetPhase() != v1alpha1.PhaseTerminating && e.GetStatus().GetPhase() != events.PhaseDeleted {
+			t.Errorf("event for brief has phase %q", e.GetStatus().GetPhase())
+		}
+	}
 
 	// A command that still runs, and a runner that does not answer, do not
 	// stop the suspend and set no outcome.
@@ -325,8 +375,9 @@ func TestSuspendAndDelete_RecordTheOutcomeBeforeTheyAct(t *testing.T) {
 
 func TestSuspend_WithoutARouterDoesNotAsk(t *testing.T) {
 	ms := memory.NewStore()
-	saveTask(t, ms, "default", "t", "Running", "")
-	srv := server.NewServer(ms)
+	sub := substratetest.NewServer(t)
+	saveTask(t, ms, sub, "default", "t", "Running", "")
+	srv := server.NewServer(ms, newTestReconciler(sub))
 	got, err := srv.SuspendTask(context.Background(), &v1alpha1.SuspendTaskRequest{Name: "t"})
 	if err != nil {
 		t.Fatal(err)
@@ -338,14 +389,15 @@ func TestSuspend_WithoutARouterDoesNotAsk(t *testing.T) {
 
 func TestSuspend_DoesNotWaitLongForASlowRunner(t *testing.T) {
 	ms := memory.NewStore()
-	saveTask(t, ms, "default", "slow", "Running", "")
+	sub := substratetest.NewServer(t)
+	saveTask(t, ms, sub, "default", "slow", "Running", "")
 	router := &fakeRouter{states: map[string]string{
 		"default/slow": `{"state":"exited","exitCode":0}`,
 	}, delay: 3 * time.Second}
 	hs := httptest.NewServer(router)
 	defer hs.Close()
 	// A client without its own timeout: only the check's bound applies.
-	srv := server.NewServer(ms, server.Options{RouterAddr: strings.TrimPrefix(hs.URL, "http://"), RouterClient: &http.Client{}})
+	srv := server.NewServer(ms, newTestReconciler(sub), server.Options{RouterAddr: strings.TrimPrefix(hs.URL, "http://"), RouterClient: &http.Client{}})
 
 	start := time.Now()
 	got, err := srv.SuspendTask(context.Background(), &v1alpha1.SuspendTaskRequest{Name: "slow"})

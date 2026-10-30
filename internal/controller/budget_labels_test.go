@@ -27,7 +27,7 @@ import (
 	"github.com/google/ax/internal/controller"
 	"github.com/google/ax/internal/substrate"
 	"github.com/google/ax/pkg/apis/v1alpha1"
-	"go.ate.dev/substrate/pkg/proto/ateapipb"
+	ateapipb "go.ate.dev/substrate/api/ateapi/v1"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -44,7 +44,6 @@ type labelControlServer struct {
 	actors     map[string]*ateapipb.Actor
 	createReqs []*ateapipb.CreateActorRequest
 	labelReqs  []*ateapipb.SetActorLabelsRequest
-	listCalls  int
 }
 
 func (s *labelControlServer) CreateAtespace(context.Context, *ateapipb.CreateAtespaceRequest) (*ateapipb.Atespace, error) {
@@ -84,17 +83,6 @@ func (s *labelControlServer) GetActor(_ context.Context, req *ateapipb.GetActorR
 		return a, nil
 	}
 	return nil, status.Error(codes.NotFound, "no actor")
-}
-
-func (s *labelControlServer) ListActors(context.Context, *ateapipb.ListActorsRequest) (*ateapipb.ListActorsResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.listCalls++
-	resp := &ateapipb.ListActorsResponse{}
-	for _, a := range s.actors {
-		resp.Actors = append(resp.Actors, a)
-	}
-	return resp, nil
 }
 
 func (s *labelControlServer) SetActorLabels(_ context.Context, req *ateapipb.SetActorLabelsRequest) (*ateapipb.Actor, error) {
@@ -152,8 +140,7 @@ func newLabelReconciler(t *testing.T, tasks ...*v1alpha1.Task) (*controller.Task
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { client.Close() })
-	r := controller.NewTaskReconciler(client, "test-template", v1alpha1.DefaultSystemNamespace)
-	r.SecretResolver = noSecrets
+	r := controller.NewTaskReconciler(client, "test-template", v1alpha1.DefaultSystemNamespace, "")
 	r.WorkspaceReadyTimeout = 50 * time.Millisecond
 	byName := map[string]*v1alpha1.Task{}
 	for _, task := range tasks {
@@ -188,10 +175,10 @@ func TestReconcile_StampsBudgetLabelsOnCreate(t *testing.T) {
 	child := budgetTask("child", "root", 0)
 	r, fake := newLabelReconciler(t, root, child)
 
-	if _, err := r.Reconcile(context.Background(), root); err != nil {
+	if _, err := r.Reconcile(context.Background(), root, nil); err != nil {
 		t.Fatal(err)
 	}
-	got, err := r.Reconcile(context.Background(), child)
+	got, err := r.Reconcile(context.Background(), child, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +201,7 @@ func TestReconcile_StampsBudgetLabelsOnCreate(t *testing.T) {
 func TestReconcile_SyncsLabelsOfExistingActor(t *testing.T) {
 	root := budgetTask("root", "", 5)
 	r, fake := newLabelReconciler(t, root)
-	if _, err := r.Reconcile(context.Background(), root); err != nil {
+	if _, err := r.Reconcile(context.Background(), root, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +244,7 @@ func TestReconcile_SyncsLabelsOfExistingActor(t *testing.T) {
 func TestReconcile_HeldResumeKeepsTaskSuspended(t *testing.T) {
 	task := budgetTask("worker", "", 1)
 	r, fake := newLabelReconciler(t, task)
-	if _, err := r.Reconcile(context.Background(), task); err != nil {
+	if _, err := r.Reconcile(context.Background(), task, nil); err != nil {
 		t.Fatal(err)
 	}
 	fake.actors["worker"].Status.Holds = []*ateapipb.ActorHold{{
@@ -265,7 +252,7 @@ func TestReconcile_HeldResumeKeepsTaskSuspended(t *testing.T) {
 	}}
 
 	task.Status.Phase = "Running"
-	got, err := r.Reconcile(context.Background(), task)
+	got, err := r.Reconcile(context.Background(), task, nil)
 	held, ok := substrate.AsHeld(err)
 	if !ok {
 		t.Fatalf("Reconcile error = %v, want a hold", err)
@@ -280,37 +267,4 @@ func TestReconcile_HeldResumeKeepsTaskSuspended(t *testing.T) {
 		t.Errorf("status.holds = %v", got.Status.Holds)
 	}
 	assertCondition(t, got, "Ready", "False", "Held")
-}
-
-func TestRefreshActorState(t *testing.T) {
-	a := budgetTask("a", "", 2)
-	b := budgetTask("b", "a", 0)
-	r, fake := newLabelReconciler(t, a, b)
-	for _, task := range []*v1alpha1.Task{a, b} {
-		if _, err := r.Reconcile(context.Background(), task); err != nil {
-			t.Fatal(err)
-		}
-	}
-	fake.actors["b"].Status.Holds = []*ateapipb.ActorHold{{Name: "ax/loop"}}
-
-	listed := []*v1alpha1.Task{
-		{Metadata: &v1alpha1.ObjectMeta{Name: "a", Atespace: "team"}},
-		{Metadata: &v1alpha1.ObjectMeta{Name: "b", Atespace: "team"}},
-	}
-	r.RefreshActorState(context.Background(), listed)
-	if fake.listCalls != 1 {
-		t.Errorf("ListActors calls = %d, want 1", fake.listCalls)
-	}
-	if len(listed[1].Status.Holds) != 1 || listed[1].Status.Holds[0].GetName() != "ax/loop" {
-		t.Errorf("b holds = %v", listed[1].Status.Holds)
-	}
-	if listed[0].Status.BudgetGroup != "team/a" || listed[1].Status.BudgetGroup != "team/a" {
-		t.Errorf("groups = %q, %q", listed[0].Status.BudgetGroup, listed[1].Status.BudgetGroup)
-	}
-
-	one := []*v1alpha1.Task{{Metadata: &v1alpha1.ObjectMeta{Name: "b", Atespace: "team"}}}
-	r.RefreshActorState(context.Background(), one)
-	if fake.listCalls != 1 || len(one[0].Status.Holds) != 1 {
-		t.Errorf("a single task should use GetActor: listCalls=%d holds=%v", fake.listCalls, one[0].Status.Holds)
-	}
 }

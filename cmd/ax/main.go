@@ -52,7 +52,7 @@ func main() {
 		cmd            = opts.cmd
 		cleanArgs      = opts.args
 		atespace       = opts.atespace
-		atespaceSet    = opts.atespaceSet
+		atespaceSet    = opts.atespaceExplicit
 		explicitServer = opts.server
 		kubeContext    = opts.kubeContext
 		axNamespace    = opts.namespace
@@ -69,7 +69,7 @@ func main() {
 	// Commands that don't require an AX server connection
 	switch cmd {
 	case "version":
-		fmt.Println("ax version v1alpha1 (standalone redis engine)")
+		fmt.Println("ax version v1alpha1")
 		return
 	case "help", "-h", "--help":
 		printUsage()
@@ -137,13 +137,15 @@ func main() {
 
 	switch cmd {
 	case "apply":
-		err = runApply(serverURL, cleanArgs)
+		var atespaceFlag *string
+		if opts.atespaceExplicit {
+			atespaceFlag = &atespace
+		}
+		err = runApply(serverURL, atespaceFlag, cleanArgs)
 	case "get":
 		err = runGet(serverURL, atespace, cleanArgs)
 	case "describe":
 		err = runDescribe(serverURL, atespace, costServer, kubeContext, cleanArgs)
-	case "watch":
-		err = runWatch(serverURL, atespace, cleanArgs)
 	case "suspend":
 		err = runSuspend(serverURL, atespace, cleanArgs)
 	case "resume":
@@ -169,16 +171,15 @@ func main() {
 // globalArgs holds the command name, the flags shared by every command, and the
 // remaining arguments for the command itself.
 type globalArgs struct {
-	cmd      string
-	args     []string
-	atespace string
-	// atespaceSet is true when -a or --atespace was given, even as "default".
-	atespaceSet   bool
-	server        string
-	kubeContext   string
-	namespace     string
-	costServer    string
-	costNamespace string
+	cmd              string
+	args             []string
+	atespace         string
+	atespaceExplicit bool
+	server           string
+	kubeContext      string
+	namespace        string
+	costServer       string
+	costNamespace    string
 }
 
 // parseGlobalArgs extracts the command name and the global flags from args. It
@@ -194,12 +195,12 @@ func parseGlobalArgs(args []string) globalArgs {
 		} else if arg == "-a" || arg == "--atespace" {
 			if i+1 < len(args) {
 				g.atespace = args[i+1]
-				g.atespaceSet = true
+				g.atespaceExplicit = true
 				i++
 			}
 		} else if strings.HasPrefix(arg, "--atespace=") {
 			g.atespace = strings.TrimPrefix(arg, "--atespace=")
-			g.atespaceSet = true
+			g.atespaceExplicit = true
 		} else if arg == "--server" {
 			if i+1 < len(args) {
 				g.server = args[i+1]
@@ -277,7 +278,6 @@ Available Commands:
   cost curve              Show < $1.00 / agent-month hosting cost sensitivity curve (On-Demand, CUD, Spot)
   cost focus              Show FOCUS 1.3 allocation keys: usage per agent and origin resource, no cost
   cost budgets            Show budget states (OK, WARN, EXHAUSTED), spend vs limit, and held actors
-  watch task <name>       Stream live status and condition updates for a task
   ssh <task-name> [-- cmd] Run a command or shell inside the running task container
                           (Ctrl-C is forwarded; press it twice quickly, or Ctrl-\, to exit locally)
   suspend task <name>     Suspend execution of a task and checkpoint state
@@ -319,7 +319,8 @@ func getAXClient(serverURL string) (v1alpha1.AXClient, *grpc.ClientConn, error) 
 	return v1alpha1.NewAXClient(conn), conn, nil
 }
 
-func runApply(serverURL string, args []string) error {
+// A nil atespace leaves manifest atespaces unchanged and lets the server default missing ones.
+func runApply(serverURL string, atespace *string, args []string) error {
 	data, ok, err := manifestFromArgs(args)
 	if err != nil {
 		return err
@@ -359,7 +360,7 @@ func runApply(serverURL string, args []string) error {
 			}
 		}
 
-		kind, name, outcome, err := applyDocument(ctx, client, &doc)
+		kind, name, outcome, err := applyDocument(ctx, client, &doc, atespace)
 		if err != nil {
 			return fmt.Errorf("applying document %d: %w", docIndex, err)
 		}
@@ -368,9 +369,9 @@ func runApply(serverURL string, args []string) error {
 }
 
 // applyDocument decodes one manifest by its kind and submits it with the matching
-// Update RPC. It reports the kind, the resource name, and whether the resource was
+// RPC. It reports the kind, the resource name, and whether the resource was
 // created, configured (spec changed), or unchanged, in the style of kubectl apply.
-func applyDocument(ctx context.Context, client v1alpha1.AXClient, doc *yaml.Node) (kind, name, outcome string, err error) {
+func applyDocument(ctx context.Context, client v1alpha1.AXClient, doc *yaml.Node, atespace *string) (kind, name, outcome string, err error) {
 	var head struct {
 		Kind string `yaml:"kind"`
 	}
@@ -384,6 +385,9 @@ func applyDocument(ctx context.Context, client v1alpha1.AXClient, doc *yaml.Node
 		if err := doc.Decode(&task); err != nil {
 			return "", "", "", err
 		}
+		if err := setApplyAtespace(task.Metadata, atespace); err != nil {
+			return "", "", "", err
+		}
 		res, err := client.CreateTask(ctx, &v1alpha1.CreateTaskRequest{Task: &task})
 		if err != nil {
 			return "", "", "", err
@@ -393,6 +397,9 @@ func applyDocument(ctx context.Context, client v1alpha1.AXClient, doc *yaml.Node
 	case v1alpha1.KindWorkspace:
 		var ws v1alpha1.Workspace
 		if err := doc.Decode(&ws); err != nil {
+			return "", "", "", err
+		}
+		if err := setApplyAtespace(ws.Metadata, atespace); err != nil {
 			return "", "", "", err
 		}
 		existing, err := client.GetWorkspace(ctx, &v1alpha1.GetWorkspaceRequest{Atespace: ws.GetMetadata().GetAtespace(), Name: ws.GetMetadata().GetName()})
@@ -408,6 +415,9 @@ func applyDocument(ctx context.Context, client v1alpha1.AXClient, doc *yaml.Node
 		if err := doc.Decode(&m); err != nil {
 			return "", "", "", err
 		}
+		if err := setApplyAtespace(m.Metadata, atespace); err != nil {
+			return "", "", "", err
+		}
 		existing, err := client.GetModel(ctx, &v1alpha1.GetModelRequest{Atespace: m.GetMetadata().GetAtespace(), Name: m.GetMetadata().GetName()})
 		outcome, err := applyOutcome(err, existing.GetSpec(), m.GetSpec())
 		if err != nil {
@@ -421,6 +431,18 @@ func applyDocument(ctx context.Context, client v1alpha1.AXClient, doc *yaml.Node
 	default:
 		return "", "", "", fmt.Errorf("unsupported kind %q (expected Task, Workspace, or Model)", head.Kind)
 	}
+}
+
+// setApplyAtespace fills a missing atespace or rejects a mismatch with an explicit flag.
+func setApplyAtespace(meta *v1alpha1.ObjectMeta, atespace *string) error {
+	if meta == nil || atespace == nil {
+		return nil
+	}
+	if meta.Atespace != "" && meta.Atespace != *atespace {
+		return fmt.Errorf("metadata.atespace %q does not match --atespace %q", meta.Atespace, *atespace)
+	}
+	meta.Atespace = *atespace
+	return nil
 }
 
 // applyOutcome classifies an apply from the result of looking up the existing
@@ -469,7 +491,7 @@ func runGet(serverURL, atespace string, args []string) error {
 		for _, t := range tasks {
 			workerIP := ""
 			actor := ""
-			phase := "Pending"
+			phase := v1alpha1.PhasePending
 			if t.Status != nil {
 				workerIP = t.Status.WorkerIp
 				actor = t.Status.Actor
@@ -769,22 +791,22 @@ func runDescribe(serverURL, atespace, costServer, kubeContext string, args []str
 		fmt.Printf("Outcome:      %s (self-reported: exit code %d%s)\n", outcome, task.GetStatus().GetExitCode(), finished)
 	}
 	if task.Spec != nil {
-		if refs := task.Spec.WorkspaceRefs(); len(refs) > 0 {
-			paths := task.Spec.WorkspacePaths()
-			fmt.Println("Workspaces:")
-			for i, ref := range refs {
-				fmt.Printf("  - %s  path=%s", ref.Name, paths[i])
-				if ref.Goal != "" {
-					fmt.Printf("  goal=%q", ref.Goal)
-				}
-				fmt.Println()
-			}
+		if ref := task.Spec.GetWorkspace(); ref != nil {
+			fmt.Printf("Workspace:    %s  path=%s\n", ref.Name, task.Spec.WorkspacePath())
 		}
 		if task.Spec.Image != "" {
 			fmt.Printf("Image:        %s\n", task.Spec.Image)
 		}
 		if len(task.Spec.Command) > 0 {
 			fmt.Printf("Command:      %v\n", task.Spec.Command)
+		}
+		if config := task.Spec.GetConfig().AsMap(); len(config) > 0 {
+			if out, err := yaml.Marshal(config); err == nil {
+				fmt.Println("Config:")
+				for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+					fmt.Printf("  %s\n", line)
+				}
+			}
 		}
 	}
 
@@ -807,59 +829,6 @@ func runDescribe(serverURL, atespace, costServer, kubeContext string, args []str
 		tryPrintTaskDescribeCost(os.Stdout, costURL, task, lookupAXTasks(ctx, serverURL, firstNonEmpty(taskAtespace, "default")))
 	}
 
-	return nil
-}
-
-func runWatch(serverURL, atespace string, args []string) error {
-	if len(args) < 2 {
-		return fmt.Errorf("usage: ax watch task <name>")
-	}
-	name := args[1]
-
-	client, conn, err := getAXClient(serverURL)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	stream, err := client.WatchTask(context.Background(), &v1alpha1.WatchTaskRequest{Atespace: atespace, Name: name})
-	if err != nil {
-		return fmt.Errorf("watching task: %w", err)
-	}
-
-	fmt.Printf("Watching task %s/%s...\n", atespace, name)
-
-	for {
-		resp, err := stream.Recv()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return fmt.Errorf("receiving stream update: %w", err)
-		}
-
-		task := resp.Task
-		if task != nil {
-			phase := ""
-			actor := ""
-			workerIP := ""
-			if task.Status != nil {
-				phase = task.Status.Phase
-				actor = task.Status.Actor
-				workerIP = task.Status.WorkerIp
-			}
-			fmt.Printf("[%s] Phase: %-10s Actor: %-18s WorkerIP: %s\n",
-				time.Now().Format("15:04:05"),
-				phase,
-				actor,
-				workerIP,
-			)
-			if phase == "Completed" || phase == "Failed" {
-				fmt.Printf("Task reached terminal phase %q.\n", phase)
-				break
-			}
-		}
-	}
 	return nil
 }
 
@@ -956,9 +925,9 @@ func manifestFromArgs(args []string) (data []byte, ok bool, err error) {
 // lifecycleRPCTimeout bounds suspend/resume RPCs, which wait for Substrate to
 // snapshot or restore the task's sandbox. MicroVM-backed sandboxes can take
 // well over a minute to snapshot/restore, so this is deliberately generous.
-// The server renews its per-task Redis lock for as long as the RPC is in
+// The server renews its per-task lock lease for as long as the RPC is in
 // flight, so this deadline is not constrained by the lock TTL (see
-// lock.RedisLocker).
+// postgres.Store.Lock).
 const lifecycleRPCTimeout = 5 * time.Minute
 
 func runSuspend(serverURL, atespace string, args []string) error {
@@ -1186,7 +1155,7 @@ func runSSH(serverURL, atespace, kubeContext string, args []string) error {
 		return fmt.Errorf("task %q has no status available", taskName)
 	}
 
-	if task.Status.Phase != "Running" {
+	if task.Status.Phase != v1alpha1.PhaseRunning {
 		return fmt.Errorf("task %q is in phase %q (must be Running to ssh)", taskName, task.Status.Phase)
 	}
 
@@ -1225,16 +1194,34 @@ func runSSH(serverURL, atespace, kubeContext string, args []string) error {
 			return fmt.Errorf("connecting to guest at %s: %w", guestEndpoint, err)
 		}
 	} else {
-		// 2. Connect via the Substrate atenet-router service in ate-system (port 80)
-		localPort, pfCleanup, err := tunnel.PortForward(context.Background(), kubeContext, "ate-system", "svc/atenet-router", 80)
-		if err != nil {
-			return fmt.Errorf("establishing port-forward to atenet-router: %w", err)
+		// 2. Connect via the Substrate atenet-router service in ate-system (mTLS on port 443, falling back to port 80)
+		axNamespace := os.Getenv("AX_SYSTEM_NAMESPACE")
+		if axNamespace == "" {
+			axNamespace = v1alpha1.DefaultSystemNamespace
 		}
-		cleanup = pfCleanup
-		routerEndpoint := fmt.Sprintf("127.0.0.1:%d", localPort)
-		guestClient, err = guest.DialTarget(routerEndpoint, targetActor)
-		if err != nil {
-			return fmt.Errorf("connecting to guest via atenet-router at %s: %w", routerEndpoint, err)
+		if tlsCfg, tlsErr := tunnel.RouterTLSConfig(context.Background(), kubeContext, axNamespace, "ax-server"); tlsErr == nil {
+			if localPort, pfCleanup, pfErr := tunnel.PortForward(context.Background(), kubeContext, "ate-system", "svc/atenet-router", 443); pfErr == nil {
+				cleanup = pfCleanup
+				routerEndpoint := fmt.Sprintf("127.0.0.1:%d", localPort)
+				guestClient, err = guest.DialTargetTLS(routerEndpoint, targetActor, tlsCfg)
+				if err != nil {
+					pfCleanup()
+					return fmt.Errorf("connecting to guest via atenet-router at %s: %w", routerEndpoint, err)
+				}
+			}
+		}
+		if guestClient == nil {
+			localPort, pfCleanup, err := tunnel.PortForward(context.Background(), kubeContext, "ate-system", "svc/atenet-router", 80)
+			if err != nil {
+				return fmt.Errorf("establishing port-forward to atenet-router: %w", err)
+			}
+			cleanup = pfCleanup
+			routerEndpoint := fmt.Sprintf("127.0.0.1:%d", localPort)
+			guestClient, err = guest.DialTarget(routerEndpoint, targetActor)
+			if err != nil {
+				pfCleanup()
+				return fmt.Errorf("connecting to guest via atenet-router at %s: %w", routerEndpoint, err)
+			}
 		}
 	}
 

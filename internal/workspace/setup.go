@@ -47,18 +47,6 @@ const (
 	gitRetries    = 5
 	gitRetryDelay = 2 * time.Second
 
-	bootstrapScriptPath = "/usr/local/bin/antigravity_bootstrap.py"
-	// bootstrapAPIKeyEnv must be set for the Antigravity agent to run.
-	bootstrapAPIKeyEnv = "GEMINI_API_KEY"
-	// bootstrapTimeoutEnv overrides the default bootstrap timeout with a Go duration string.
-	bootstrapTimeoutEnv = "AX_BOOTSTRAP_TIMEOUT"
-	// bootstrapDataDir, under AXDir, is where the agent keeps its own state so
-	// conversation logs and caches stay out of the workspace.
-	bootstrapDataDir = "antigravity"
-	// defaultBootstrapTimeout allows the agent enough time to install toolchains and
-	// dependencies. The workspace reports not-ready until it finishes.
-	defaultBootstrapTimeout = 10 * time.Minute
-
 	dirPerm  = 0o755
 	filePerm = 0o644
 )
@@ -73,33 +61,29 @@ type SetupResult struct {
 	ClonedRepos   []string
 	SkillsMounted string
 	IsMaidenRun   bool
-	// BootstrapRan reports whether the Antigravity agent ran to completion for the goal.
-	BootstrapRan bool
 }
 
 // SetupWorkspace prepares the workspace directory on its maiden run: it clones the
-// declared Git repositories, creates the skills path, and invokes the Antigravity
-// bootstrap when a goal is provided. A marker file under AXDir records a completed
-// maiden run so subsequent calls are no-ops.
+// declared Git repositories and creates the skills path. A marker file under AXDir
+// records a completed maiden run so subsequent calls are no-ops.
 //
 // Git failures are logged and recorded under AXDir but do not abort setup. The marker
 // is withheld in that case so the next start retries the clone.
-func SetupWorkspace(ctx context.Context, ws *v1alpha1.Workspace, targetPath string, goal string) (*SetupResult, error) {
-	return SetupIn(ctx, ws, targetPath, goal, AXDir)
+func SetupWorkspace(ctx context.Context, ws *v1alpha1.Workspace, targetPath string) (*SetupResult, error) {
+	return SetupIn(ctx, ws, targetPath, AXDir)
 }
 
-// SetupIn is SetupWorkspace with the state directory, which holds the marker,
-// the setup logs, and the bootstrap agent's data, given by the caller. Use a
-// directory on the durable volume, so that the marker survives a resume.
-func SetupIn(ctx context.Context, ws *v1alpha1.Workspace, targetPath, goal, stateDir string) (*SetupResult, error) {
+// SetupIn is SetupWorkspace with the state directory, which holds the marker
+// and the setup logs, given by the caller. Use a directory on the durable
+// volume, so that the marker survives a resume.
+func SetupIn(ctx context.Context, ws *v1alpha1.Workspace, targetPath, stateDir string) (*SetupResult, error) {
 	if stateDir == "" {
 		stateDir = DefaultAXDir
 	}
 	if targetPath == "" {
 		targetPath = defaultWorkspacePath
 	}
-	// Tooling downstream (git, the Antigravity agent) scopes itself to this path,
-	// so it must be absolute.
+	// Tooling downstream (git) scopes itself to this path, so it must be absolute.
 	if abs, err := filepath.Abs(targetPath); err == nil {
 		targetPath = abs
 	}
@@ -126,10 +110,6 @@ func SetupIn(ctx context.Context, ws *v1alpha1.Workspace, targetPath, goal, stat
 		writeFiles(ws.Spec.Files, targetPath)
 		res.ClonedRepos, gitOK = cloneRepos(ctx, ws.Spec.Git, targetPath, stateDir)
 		res.SkillsMounted = setupSkills(ws.Spec.Skills)
-	}
-
-	if goal != "" {
-		res.BootstrapRan = runBootstrap(ctx, goal, targetPath, stateDir)
 	}
 
 	if !gitOK {
@@ -285,69 +265,9 @@ func setupSkills(skills *v1alpha1.SkillsConfig) string {
 	return skills.Path
 }
 
-// runBootstrap hands the goal to the Antigravity agent so it can prepare the workspace.
-// It reports whether the agent ran to completion. The agent needs the bootstrap script
-// installed and an API key in the environment; when either is missing the step is
-// skipped with a log line. Failures are logged and otherwise ignored so the task's own
-// command still starts.
-func runBootstrap(ctx context.Context, goal, targetPath, stateDir string) bool {
-	if _, err := os.Stat(bootstrapScriptPath); err != nil {
-		slog.Info("Antigravity bootstrap script not installed; skipping", "script", bootstrapScriptPath)
-		return false
-	}
-	if os.Getenv(bootstrapAPIKeyEnv) == "" {
-		slog.Warn("workspace goal set but no API key available; skipping Antigravity bootstrap", "env", bootstrapAPIKeyEnv)
-		return false
-	}
-
-	timeout := bootstrapTimeout()
-	slog.Info("invoking Antigravity workspace bootstrap with goal", "goal", goal, "dir", targetPath, "timeout", timeout)
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	dataDir := filepath.Join(stateDir, bootstrapDataDir)
-	if err := os.MkdirAll(dataDir, dirPerm); err != nil {
-		slog.Warn("creating Antigravity data dir", "dir", dataDir, "error", err)
-	}
-
-	cmd := exec.CommandContext(ctx, "python3", bootstrapScriptPath,
-		"--goal", goal,
-		"--workspace", targetPath,
-		"--data-dir", dataDir,
-	)
-	cmd.Dir = targetPath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			slog.Warn("Antigravity bootstrap timed out (continuing)", "timeout", timeout)
-		} else {
-			slog.Warn("Antigravity bootstrap failed (continuing)", "error", err)
-		}
-		return false
-	}
-	slog.Info("Antigravity bootstrap completed successfully")
-	return true
-}
-
-// bootstrapTimeout returns the configured bootstrap timeout, falling back to the default
-// when the override is unset or unparsable.
-func bootstrapTimeout() time.Duration {
-	raw := os.Getenv(bootstrapTimeoutEnv)
-	if raw == "" {
-		return defaultBootstrapTimeout
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d <= 0 {
-		slog.Warn("invalid bootstrap timeout; using default", "env", bootstrapTimeoutEnv, "value", raw, "default", defaultBootstrapTimeout)
-		return defaultBootstrapTimeout
-	}
-	return d
-}
-
 // MarkerName returns the maiden-run marker file name for a workspace mounted at
-// path. The name is derived from the path so several workspaces in one
-// container track their setup independently.
+// path. The name is derived from the path so a workspace mounted somewhere
+// other than the default tracks its setup independently.
 func MarkerName(path string) string {
 	if path == "" {
 		path = defaultWorkspacePath
@@ -374,7 +294,7 @@ func writeMarker(path string, ws *v1alpha1.Workspace) {
 // excludeStateDir adds stateDir to the local exclude file of the repository
 // cloned at dest when stateDir is inside dest's working tree, for example a
 // repository cloned into the workspace root (dir "."). Then the agent cannot
-// commit the runner's markers, logs, or the bootstrap agent's data by mistake.
+// commit the runner's markers or logs by mistake.
 func excludeStateDir(dest, stateDir string) {
 	rel, err := filepath.Rel(dest, stateDir)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
@@ -395,7 +315,7 @@ func excludeStateDir(dest, stateDir string) {
 		return
 	}
 	defer f.Close()
-	if _, err := fmt.Fprintf(f, "\n# AX runner state (markers, logs, bootstrap data)\n%s\n", pattern); err != nil {
+	if _, err := fmt.Fprintf(f, "\n# AX runner state (markers and logs)\n%s\n", pattern); err != nil {
 		slog.Warn("writing the git exclude file", "path", path, "error", err)
 	}
 }

@@ -17,10 +17,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -28,12 +31,11 @@ import (
 	"github.com/google/ax/internal/auth"
 	"github.com/google/ax/internal/controller"
 	"github.com/google/ax/internal/events"
-	"github.com/google/ax/internal/lock"
 	"github.com/google/ax/internal/server"
-	"github.com/google/ax/internal/store/redis"
+	"github.com/google/ax/internal/store/postgres"
 	"github.com/google/ax/internal/substrate"
 	"github.com/google/ax/pkg/apis/v1alpha1"
-	goredis "github.com/redis/go-redis/v9"
+	"github.com/jackc/pgx/v5/pgconn"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -41,8 +43,7 @@ import (
 func main() {
 	var (
 		listenAddr              string
-		redisAddr               string
-		redisPassword           string
+		storeURL                string
 		substrateEndpoint       string
 		substrateAuthority      string
 		substrateTokenFile      string
@@ -51,8 +52,7 @@ func main() {
 		substratePlaintext      bool
 		defaultTemplate         string
 		defaultTemplateAtespace string
-		defaultTaskCPU          string
-		defaultTaskMemory       string
+		defaultTaskImage        string
 		routerAddr              string
 		taskResyncInterval      time.Duration
 		outcomePollInterval     time.Duration
@@ -64,8 +64,7 @@ func main() {
 	)
 
 	flag.StringVar(&listenAddr, "addr", ":8080", "HTTP listen address")
-	flag.StringVar(&redisAddr, "redis-addr", "localhost:6379", "Redis server address")
-	flag.StringVar(&redisPassword, "redis-password", "", "Redis password")
+	flag.StringVar(&storeURL, "store", "postgres://ax@localhost:5432/ax?sslmode=disable", "PostgreSQL connection URL (env: AX_STORE). libpq variables such as PGPASSWORD fill in what it leaves out")
 	flag.StringVar(&substrateEndpoint, "substrate-endpoint", "api.ate-system.svc.cluster.local:443", "Agent Substrate Control API endpoint")
 	flag.StringVar(&substrateAuthority, "substrate-authority", "api.ate-system.svc", "Authority / TLS ServerName for Substrate endpoint")
 	flag.StringVar(&substrateTokenFile, "substrate-token-file", "", "Path to bearer token file for Substrate auth")
@@ -74,9 +73,8 @@ func main() {
 	flag.BoolVar(&substratePlaintext, "substrate-plaintext", false, "Use insecure plaintext gRPC connection to Substrate")
 	flag.StringVar(&defaultTemplate, "template", "default-template", "Default Substrate ActorTemplate name")
 	flag.StringVar(&defaultTemplateAtespace, "template-atespace", v1alpha1.DefaultSystemNamespace, "Default Substrate ActorTemplate atespace")
-	flag.StringVar(&defaultTaskCPU, "default-task-cpu", controller.DefaultTaskCPU, "Sandbox CPU limit for a task that sets no spec.resources")
-	flag.StringVar(&defaultTaskMemory, "default-task-memory", controller.DefaultTaskMemory, "Sandbox memory limit for a task that sets no spec.resources")
-	flag.StringVar(&routerAddr, "router-addr", os.Getenv("ATENET_ROUTER_ADDR"), "atenet router host:port, for reading each running task's command state (default $ATENET_ROUTER_ADDR)")
+	flag.StringVar(&defaultTaskImage, "default-task-image", v1alpha1.DefaultTaskImage, "Container image for tasks that do not set spec.image (env: AX_DEFAULT_TASK_IMAGE)")
+	flag.StringVar(&routerAddr, "router-addr", os.Getenv("ATENET_ROUTER_ADDR"), "atenet router address (URL, or host:port where port 443 means https), for reading each running task's command state (default $ATENET_ROUTER_ADDR)")
 	flag.DurationVar(&outcomePollInterval, "outcome-poll-interval", server.DefaultOutcomePollInterval, "Time between reads of the command state of running tasks; 0 turns task outcomes off")
 	flag.IntVar(&outcomePollConcurrency, "outcome-poll-concurrency", server.DefaultOutcomePollConcurrency, "Most command state requests in flight at a time")
 	flag.DurationVar(&taskResyncInterval, "task-resync-interval", server.DefaultTaskResyncInterval, "Time between two sends of the current state of every task over OTLP, which repair dropped task events; 0 turns the resync off")
@@ -86,21 +84,17 @@ func main() {
 	flag.DurationVar(&authCacheTTL, "auth-cache-ttl", auth.DefaultCacheTTL, "How long to keep a token review result")
 	flag.Parse()
 
-	for name, q := range map[string]string{"--default-task-cpu": defaultTaskCPU, "--default-task-memory": defaultTaskMemory} {
-		if err := v1alpha1.ValidateQuantity(q); err != nil {
-			slog.Error("invalid flag value", "flag", name, "value", q, "error", err)
-			os.Exit(2)
-		}
-	}
-
 	if envAddr := os.Getenv("ADDR"); envAddr != "" {
 		listenAddr = envAddr
 	}
-	if envRedis := os.Getenv("REDIS_ADDR"); envRedis != "" {
-		redisAddr = envRedis
+	// TODO: Reject or warn on passwords embedded in the store URL. They end up
+	// in process args and pod specs; credentials should come from PGPASSWORD,
+	// a password file, or a Secret instead.
+	if envStore := os.Getenv("AX_STORE"); envStore != "" {
+		storeURL = envStore
 	}
-	if envPass := os.Getenv("REDIS_PASSWORD"); envPass != "" {
-		redisPassword = envPass
+	if envImage := os.Getenv("AX_DEFAULT_TASK_IMAGE"); envImage != "" {
+		defaultTaskImage = envImage
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -108,21 +102,21 @@ func main() {
 
 	slog.Info("starting ax-server",
 		"listenAddr", listenAddr,
-		"redisAddr", redisAddr,
+		"store", describeStore(storeURL),
 		"substrateEndpoint", substrateEndpoint,
 		"template", defaultTemplate,
+		"defaultTaskImage", defaultTaskImage,
 	)
 
-	rClient := goredis.NewClient(&goredis.Options{
-		Addr:     redisAddr,
-		Password: redisPassword,
-	})
-	defer rClient.Close()
+	openCtx, openCancel := context.WithTimeout(context.Background(), time.Minute)
+	backend, err := postgres.Open(openCtx, storeURL, postgres.Options{})
+	openCancel()
+	if err != nil {
+		slog.Error("opening store", "store", describeStore(storeURL), "error", err)
+		os.Exit(1)
+	}
+	defer backend.Close()
 
-	rStore := redis.NewStore(rClient, redis.Options{})
-	rLocker := lock.NewRedisLocker(rClient, lock.RedisLockerOptions{})
-
-	var reconciler server.Reconciler
 	subClient, err := substrate.NewClientWithOptions(substrate.ClientOptions{
 		Target:      substrateEndpoint,
 		Authority:   substrateAuthority,
@@ -132,16 +126,15 @@ func main() {
 		Plaintext:   substratePlaintext,
 	})
 	if err != nil {
-		slog.Warn("could not initialize substrate client; running without substrate reconciliation", "error", err)
-	} else {
-		defer subClient.Close()
-		tr := controller.NewTaskReconciler(subClient, defaultTemplate, defaultTemplateAtespace)
-		tr.DefaultLimits = substrate.Limits{CPU: defaultTaskCPU, Memory: defaultTaskMemory}
-		// Budget labels follow spec.parent up to the task that owns the
-		// tree's budget.
-		tr.Tasks = rStore.GetTask
-		reconciler = tr
+		slog.Error("initializing substrate client", "error", err)
+		os.Exit(1)
 	}
+	defer subClient.Close()
+
+	reconciler := controller.NewTaskReconciler(subClient, defaultTemplate, defaultTemplateAtespace, defaultTaskImage)
+	// Budget labels follow spec.parent up to the task that owns the tree's
+	// budget.
+	reconciler.Tasks = backend.GetTask
 
 	// Task events go out only when an OTLP endpoint is set
 	// (OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_LOGS_ENDPOINT).
@@ -196,9 +189,8 @@ func main() {
 	if outcomePollInterval <= 0 {
 		outcomeRouterAddr = ""
 	}
-	srv := server.NewServer(rStore, server.Options{
-		Locker:     rLocker,
-		Reconciler: reconciler,
+	srv := server.NewServer(backend, reconciler, server.Options{
+		Locker:     backend,
 		Events:     emitter,
 		Guard:      guard,
 		RouterAddr: outcomeRouterAddr,
@@ -243,4 +235,16 @@ func main() {
 	if err := emitter.Shutdown(shutdownCtx); err != nil {
 		slog.Warn("flushing task events", "error", err)
 	}
+}
+
+// describeStore summarizes a store connection string for logs. It parses the
+// string the way the store does, so URLs, query parameters and keyword/value
+// DSNs are all handled, and reports only the user, host, port and database.
+// Passwords and other connection parameters are never included.
+func describeStore(connString string) string {
+	cfg, err := pgconn.ParseConfig(connString)
+	if err != nil {
+		return "<unparseable>"
+	}
+	return fmt.Sprintf("%s@%s/%s", cfg.User, net.JoinHostPort(cfg.Host, strconv.Itoa(int(cfg.Port))), cfg.Database)
 }

@@ -36,8 +36,7 @@ When you start on an issue or pull request, assign yourself to it, so others kno
 ### Prerequisites
 
 - **Go 1.27+**
-- **[`ko`](https://ko.build/)** (for building and deploying control plane images)
-- **Docker** or **Podman** (for building the Linux task-runner container image)
+- **Podman** or **Docker** (for building the Linux container images)
 - A Kubernetes cluster with [Agent Substrate](https://github.com/agent-substrate/substrate) installed
 
 ### Building Binaries
@@ -74,26 +73,26 @@ Or run via `go test`:
 go test -v ./...
 ```
 
-### Building the Task Runner Image
+### Building the Images
 
-Cross-compile the task runner for `linux/amd64` and package the container image:
-
-```bash
-make build-task-runner
-```
-
-To build and push to a remote container registry:
+Cross-compile `ax-server` and `ax-task-runner` for `linux/amd64`, build their container images (with `podman` if available, otherwise `docker`), and push them to `$AX_IMAGE_REPO`:
 
 ```bash
-make push-task-runner TASK_RUNNER_REPO=gcr.io/<your-project>/ax-task-runner
+export AX_IMAGE_REPO=<your-registry>   # e.g. gcr.io/my-project
+make images
 ```
 
 ### Deploying to Kubernetes
 
-Deploy Redis and server components to your cluster in the `ax-system` namespace:
+For a new installation, follow the [version-pinned installation guide](docs/installation.md)
+to configure cluster-specific settings before deploying.
+
+If your cluster uses the checked-in deployment defaults, the Make target below
+deploys PostgreSQL and server components into `ax-system`. Otherwise, apply the
+guide's edited manifest; `make deploy` reapplies the checked-in defaults.
 
 ```bash
-make deploy AX_IMAGE_REPO=gcr.io/<your-project>/ax-images
+make deploy
 ```
 
 ---

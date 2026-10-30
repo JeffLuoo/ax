@@ -17,7 +17,6 @@ package server_test
 import (
 	"context"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -27,6 +26,7 @@ import (
 	"github.com/google/ax/internal/auth"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store/memory"
+	"github.com/google/ax/internal/substrate/substratetest"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -82,7 +82,6 @@ func TestGuard_GRPC(t *testing.T) {
 		grants: map[string]bool{
 			"alice create tasks team-a": true,
 			"alice get tasks team-a":    true,
-			"alice watch tasks team-a":  true,
 			"alice list tasks team-a":   true,
 			"bob get tasks team-a":      true,
 			"admin list tasks ":         true,
@@ -90,7 +89,7 @@ func TestGuard_GRPC(t *testing.T) {
 	}
 	kube := fakeAPI.client()
 	ms := memory.NewStore()
-	srv := server.NewServer(ms, server.Options{Guard: &auth.Guard{
+	srv := server.NewServer(ms, newTestReconciler(substratetest.NewServer(t)), server.Options{Guard: &auth.Guard{
 		Authn: auth.NewTokenReviewAuthenticator(kube, auth.TokenReviewOptions{}),
 		Authz: auth.NewSubjectAccessReviewAuthorizer(kube),
 	}})
@@ -164,24 +163,6 @@ func TestGuard_GRPC(t *testing.T) {
 	if got, err := client.ListTasks(as("admin-token"), &v1alpha1.ListTasksRequest{}); err != nil || len(got.GetTasks()) != 1 {
 		t.Errorf("admin lists all atespaces = %v, %v", got, err)
 	}
-
-	// The stream checks its one request before the handler sends anything.
-	stream, err := client.WatchTask(as("bob-token"), &v1alpha1.WatchTaskRequest{Atespace: "team-a", Name: "t1"})
-	if err == nil {
-		_, err = stream.Recv()
-	}
-	if status.Code(err) != codes.PermissionDenied {
-		t.Errorf("bob watches: got %v, want PermissionDenied", err)
-	}
-	wctx, wcancel := context.WithCancel(as("alice-token"))
-	stream, err = client.WatchTask(wctx, &v1alpha1.WatchTaskRequest{Atespace: "team-a", Name: "t1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stream.Recv(); err != nil && err != io.EOF {
-		t.Errorf("alice watches: %v", err)
-	}
-	wcancel()
 
 	// An authorization API error fails closed.
 	fakeAPI.mu.Lock()

@@ -28,7 +28,7 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	"github.com/google/ax/pkg/apis/v1alpha1"
-	"go.ate.dev/substrate/pkg/proto/ateapipb"
+	ateapipb "go.ate.dev/substrate/api/ateapi/v1"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -292,36 +292,46 @@ func retryOnCodes(ctx context.Context, fn func() error, retryable ...codes.Code)
 	return err
 }
 
-// Limits is the size of an actor's sandbox: its cpu and memory limits, as
-// Kubernetes quantity strings such as "500m" or "2Gi". Agent Substrate sizes
-// the sandbox from them and books that size on a worker.
-type Limits struct {
-	CPU    string
-	Memory string
-}
+const (
+	// DefaultCPUMillicores is the default CPU limit (1 core) applied to an
+	// ActorTemplate when a Task omits spec.resources.limits.cpu.
+	DefaultCPUMillicores int64 = 1000
+	// DefaultMemoryBytes is the default memory limit (512 MiB) applied to an
+	// ActorTemplate when a Task omits spec.resources.limits.memory.
+	DefaultMemoryBytes int64 = 512 << 20
+)
 
-// IsZero reports whether no limit is set.
-func (l Limits) IsZero() bool { return l.CPU == "" && l.Memory == "" }
-
-// resources returns the template's resources block, or nil when no limit is set.
-func (l Limits) resources() *ateapipb.Resources {
-	if l.IsZero() {
+// ResourceLimits translates a Task's resource limits into the Substrate
+// ActorTemplate resources block. Substrate sizes a sandbox by limits alone
+// (requests are rejected by v1alpha1.ValidateResources). It returns nil when no
+// limit is set so the template uses the default sandbox limits.
+func ResourceLimits(reqs *v1alpha1.ResourcesSpec) *ateapipb.ResourceRequirements {
+	limits := reqs.GetLimits()
+	cpuStr := limits.GetCpu()
+	memStr := limits.GetMemory()
+	if cpuStr == "" && memStr == "" {
 		return nil
 	}
-	r := &ateapipb.Resources{}
-	if l.CPU != "" {
-		r.Limits = append(r.Limits, &ateapipb.Limits{Name: "cpu", Quantity: l.CPU})
+	out := &ateapipb.Resources{
+		CpuMillicores: DefaultCPUMillicores,
+		MemoryBytes:   DefaultMemoryBytes,
 	}
-	if l.Memory != "" {
-		r.Limits = append(r.Limits, &ateapipb.Limits{Name: "memory", Quantity: l.Memory})
+	if cpuStr != "" {
+		if cpu, err := v1alpha1.ParseCPUMillicores(cpuStr); err == nil {
+			out.CpuMillicores = cpu
+		}
 	}
-	return r
+	if memStr != "" {
+		if mem, err := v1alpha1.ParseMemoryBytes(memStr); err == nil {
+			out.MemoryBytes = mem
+		}
+	}
+	return &ateapipb.ResourceRequirements{Limits: out}
 }
 
-// BuildActorTemplate constructs a Substrate ActorTemplate based on the standard
-// ate-env specification. limits sets the sandbox size; Agent Substrate requires
-// both a cpu and a memory limit.
-func BuildActorTemplate(atespace, name, image string, envMap map[string]string, command []string, snapshotsBucket string, limits Limits) *ateapipb.ActorTemplate {
+// BuildActorTemplate constructs a Substrate ActorTemplate based on the standard ate-env specification.
+// A nil resources applies DefaultCPUMillicores and DefaultMemoryBytes.
+func BuildActorTemplate(atespace, name, image string, envMap map[string]string, command []string, snapshotsBucket string, resources *ateapipb.ResourceRequirements) *ateapipb.ActorTemplate {
 	if atespace == "" {
 		atespace = "default"
 	}
@@ -345,6 +355,17 @@ func BuildActorTemplate(atespace, name, image string, envMap map[string]string, 
 			Name:  k,
 			Value: v,
 		})
+	}
+
+	cpuMillicores := DefaultCPUMillicores
+	memoryBytes := DefaultMemoryBytes
+	if limits := resources.GetLimits(); limits != nil {
+		if limits.GetCpuMillicores() > 0 {
+			cpuMillicores = limits.GetCpuMillicores()
+		}
+		if limits.GetMemoryBytes() > 0 {
+			memoryBytes = limits.GetMemoryBytes()
+		}
 	}
 
 	return &ateapipb.ActorTemplate{
@@ -376,25 +397,25 @@ func BuildActorTemplate(atespace, name, image string, envMap map[string]string, 
 			StorageLocation:   snapshotsBucket,
 			PreferredFidelity: ateapipb.SnapshotFidelity_SNAPSHOT_FIDELITY_VOLUMES,
 		},
-		SandboxConfig: &ateapipb.SandboxConfig{
-			SandboxClass: "gvisor",
-			ConfigName:   "gvisor-default",
+		Resources: &ateapipb.ResourceRequirements{
+			Limits: &ateapipb.Resources{
+				CpuMillicores: cpuMillicores,
+				MemoryBytes:   memoryBytes,
+			},
 		},
-		Resources: limits.resources(),
 	}
 }
 
-// EnsureActorTemplateWithImage creates an ActorTemplate with the given container
-// image, sandbox limits, and environment variables, unless it already exists.
-// The name must change whenever any of them changes, because a template is
-// immutable.
-func (c *Client) EnsureActorTemplateWithImage(ctx context.Context, baseAtespace, baseTemplate, targetAtespace, targetTemplate, image string, limits Limits, env map[string]string) (*ateapipb.ActorTemplate, error) {
+// EnsureActorTemplateWithImage creates an ActorTemplate using the specified container image,
+// resource limits (nil for default limits), and optional environment variables,
+// unless it already exists. The name must change whenever any of them changes,
+// because a template is immutable.
+func (c *Client) EnsureActorTemplateWithImage(ctx context.Context, baseAtespace, baseTemplate, targetAtespace, targetTemplate, image string, resources *ateapipb.ResourceRequirements, extraEnv ...map[string]string) (*ateapipb.ActorTemplate, error) {
 	var base *ateapipb.ActorTemplate
 	if baseTemplate != "" {
 		base, _ = c.GetActorTemplate(ctx, baseAtespace, baseTemplate)
 	}
 	waitGolden := base != nil && base.GetStatus().GetGoldenSnapshotStatus().GetGoldenTag() != nil
-
 	existing, err := c.GetActorTemplate(ctx, targetAtespace, targetTemplate)
 	if err == nil && existing != nil {
 		if waitGolden && existing.GetStatus().GetGoldenSnapshotStatus().GetGoldenTag() == nil {
@@ -403,7 +424,14 @@ func (c *Client) EnsureActorTemplateWithImage(ctx context.Context, baseAtespace,
 		return existing, nil
 	}
 
-	tmpl := BuildActorTemplate(targetAtespace, targetTemplate, image, env, nil, "", limits)
+	envMap := make(map[string]string)
+	for _, envs := range extraEnv {
+		for k, v := range envs {
+			envMap[k] = v
+		}
+	}
+
+	tmpl := BuildActorTemplate(targetAtespace, targetTemplate, image, envMap, nil, "", resources)
 	if base != nil {
 		if tmpl.WorkerSelector == nil && base.GetWorkerSelector() != nil {
 			tmpl.WorkerSelector = proto.Clone(base.GetWorkerSelector()).(*ateapipb.Selector)
@@ -620,11 +648,16 @@ func (c *Client) ResumeActor(ctx context.Context, atespace, actorName string) (*
 	if resp.GetActor() == nil {
 		return nil, "", fmt.Errorf("nil actor returned when resuming %s/%s", atespace, actorName)
 	}
-	var workerIP string
-	if ips := resp.GetActor().GetStatus().GetWorkerAssignment().GetWorkerPodIps(); len(ips) > 0 {
-		workerIP = ips[0]
+	return resp.GetActor(), WorkerIP(resp.GetActor()), nil
+}
+
+// WorkerIP returns the pod IP of the worker hosting the actor, or "" when the
+// actor has no worker (for example while it is suspended).
+func WorkerIP(actor *ateapipb.Actor) string {
+	if ips := actor.GetStatus().GetWorkerAssignment().GetWorkerPodIps(); len(ips) > 0 {
+		return ips[0]
 	}
-	return resp.GetActor(), workerIP, nil
+	return ""
 }
 
 // SuspendActor suspends the specified actor, triggering state checkpointing.
@@ -662,6 +695,29 @@ func (c *Client) GetActor(ctx context.Context, atespace, actorName string) (*ate
 	return actor, err
 }
 
+// ListActors returns every Actor in the given atespace, or in all atespaces
+// when atespace is empty.
+func (c *Client) ListActors(ctx context.Context, atespace string) ([]*ateapipb.Actor, error) {
+	var actors []*ateapipb.Actor
+	req := &ateapipb.ListActorsRequest{Atespace: atespace, Options: &ateapipb.ListOptions{}}
+	for {
+		var resp *ateapipb.ListActorsResponse
+		err := retryOnCodes(ctx, func() error {
+			var err error
+			resp, err = c.control.ListActors(ctx, req)
+			return err
+		}, codes.Unavailable)
+		if err != nil {
+			return nil, fmt.Errorf("listing actors in %q: %w", atespace, err)
+		}
+		actors = append(actors, resp.GetActors()...)
+		if resp.GetNextPageToken() == "" {
+			return actors, nil
+		}
+		req.Options.PageToken = resp.GetNextPageToken()
+	}
+}
+
 // DeleteActor deletes the specified actor from Substrate and blocks until the actor
 // is fully deleted.
 func (c *Client) DeleteActor(ctx context.Context, atespace, actorName string) error {
@@ -670,7 +726,6 @@ func (c *Client) DeleteActor(ctx context.Context, atespace, actorName string) er
 			Atespace: atespace,
 			Name:     actorName,
 		},
-		AnyState: true,
 	}
 	err := retryOnCodes(ctx, func() error {
 		_, err := c.control.DeleteActor(ctx, req)
@@ -741,34 +796,6 @@ func (c *Client) SetActorLabels(ctx context.Context, atespace, actorName string,
 		return nil, fmt.Errorf("setting labels on actor %s/%s: %w", atespace, actorName, err)
 	}
 	return actor, nil
-}
-
-// listActorsMaxPages bounds ListActors, so a misbehaving page token cannot
-// loop.
-const listActorsMaxPages = 50
-
-// ListActors returns the actors in the atespace.
-func (c *Client) ListActors(ctx context.Context, atespace string) ([]*ateapipb.Actor, error) {
-	var out []*ateapipb.Actor
-	token := ""
-	for page := 0; page < listActorsMaxPages; page++ {
-		var resp *ateapipb.ListActorsResponse
-		err := retryOnCodes(ctx, func() error {
-			var err error
-			resp, err = c.control.ListActors(ctx, &ateapipb.ListActorsRequest{Atespace: atespace, Options: &ateapipb.ListOptions{PageSize: 1000, PageToken: token}})
-			return err
-		}, codes.Unavailable)
-		if err != nil {
-			return nil, fmt.Errorf("listing actors in %s: %w", atespace, err)
-		}
-		out = append(out, resp.GetActors()...)
-		token = resp.GetNextPageToken()
-		if token == "" {
-			return out, nil
-		}
-	}
-	slog.Warn("actor listing was truncated", "atespace", atespace)
-	return out, nil
 }
 
 // Holds returns the actor's holds as Ax task status holds.

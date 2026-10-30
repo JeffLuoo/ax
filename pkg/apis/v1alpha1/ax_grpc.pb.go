@@ -39,7 +39,6 @@ const (
 	AX_DeleteTask_FullMethodName       = "/ax.v1alpha1.AX/DeleteTask"
 	AX_SuspendTask_FullMethodName      = "/ax.v1alpha1.AX/SuspendTask"
 	AX_ResumeTask_FullMethodName       = "/ax.v1alpha1.AX/ResumeTask"
-	AX_WatchTask_FullMethodName        = "/ax.v1alpha1.AX/WatchTask"
 	AX_UpdateTaskBudget_FullMethodName = "/ax.v1alpha1.AX/UpdateTaskBudget"
 	AX_GetWorkspace_FullMethodName     = "/ax.v1alpha1.AX/GetWorkspace"
 	AX_ListWorkspaces_FullMethodName   = "/ax.v1alpha1.AX/ListWorkspaces"
@@ -64,7 +63,6 @@ type AXClient interface {
 	DeleteTask(ctx context.Context, in *DeleteTaskRequest, opts ...grpc.CallOption) (*DeleteTaskResponse, error)
 	SuspendTask(ctx context.Context, in *SuspendTaskRequest, opts ...grpc.CallOption) (*Task, error)
 	ResumeTask(ctx context.Context, in *ResumeTaskRequest, opts ...grpc.CallOption) (*Task, error)
-	WatchTask(ctx context.Context, in *WatchTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchTaskResponse], error)
 	// UpdateTaskBudget replaces spec.budget, the only part of a task's spec
 	// that can change after create, and syncs the budget labels of the task's
 	// actor and of every actor under it.
@@ -148,25 +146,6 @@ func (c *aXClient) ResumeTask(ctx context.Context, in *ResumeTaskRequest, opts .
 	}
 	return out, nil
 }
-
-func (c *aXClient) WatchTask(ctx context.Context, in *WatchTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchTaskResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AX_ServiceDesc.Streams[0], AX_WatchTask_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[WatchTaskRequest, WatchTaskResponse]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AX_WatchTaskClient = grpc.ServerStreamingClient[WatchTaskResponse]
 
 func (c *aXClient) UpdateTaskBudget(ctx context.Context, in *UpdateTaskBudgetRequest, opts ...grpc.CallOption) (*Task, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -271,7 +250,6 @@ type AXServer interface {
 	DeleteTask(context.Context, *DeleteTaskRequest) (*DeleteTaskResponse, error)
 	SuspendTask(context.Context, *SuspendTaskRequest) (*Task, error)
 	ResumeTask(context.Context, *ResumeTaskRequest) (*Task, error)
-	WatchTask(*WatchTaskRequest, grpc.ServerStreamingServer[WatchTaskResponse]) error
 	// UpdateTaskBudget replaces spec.budget, the only part of a task's spec
 	// that can change after create, and syncs the budget labels of the task's
 	// actor and of every actor under it.
@@ -313,9 +291,6 @@ func (UnimplementedAXServer) SuspendTask(context.Context, *SuspendTaskRequest) (
 }
 func (UnimplementedAXServer) ResumeTask(context.Context, *ResumeTaskRequest) (*Task, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResumeTask not implemented")
-}
-func (UnimplementedAXServer) WatchTask(*WatchTaskRequest, grpc.ServerStreamingServer[WatchTaskResponse]) error {
-	return status.Error(codes.Unimplemented, "method WatchTask not implemented")
 }
 func (UnimplementedAXServer) UpdateTaskBudget(context.Context, *UpdateTaskBudgetRequest) (*Task, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateTaskBudget not implemented")
@@ -472,17 +447,6 @@ func _AX_ResumeTask_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	return interceptor(ctx, in, info, handler)
 }
-
-func _AX_WatchTask_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(WatchTaskRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(AXServer).WatchTask(m, &grpc.GenericServerStream[WatchTaskRequest, WatchTaskResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AX_WatchTaskServer = grpc.ServerStreamingServer[WatchTaskResponse]
 
 func _AX_UpdateTaskBudget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateTaskBudgetRequest)
@@ -714,12 +678,6 @@ var AX_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AX_DeleteModel_Handler,
 		},
 	},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "WatchTask",
-			Handler:       _AX_WatchTask_Handler,
-			ServerStreams: true,
-		},
-	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "pkg/apis/v1alpha1/ax.proto",
 }

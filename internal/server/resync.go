@@ -77,7 +77,8 @@ func (s *Server) RunTaskResync(ctx context.Context, opts TaskResyncOptions) {
 }
 
 // ResyncTasks makes one pass over the stored tasks and sends a task event for
-// each one. It returns how many events it sent.
+// each one, with the task as GetTask reports it. It returns how many events it
+// sent.
 //
 // It reads the store one page at a time and waits opts.PagePause after each
 // page, so a large store does not fill the exporter's queue. It reads each
@@ -98,7 +99,7 @@ func (s *Server) ResyncTasks(ctx context.Context, opts TaskResyncOptions) int {
 
 	sent := 0
 	for offset := int64(0); ; offset += pageSize {
-		page, err := s.store.ListTasks(ctx, "", pageSize, offset)
+		page, err := s.storedTasks(ctx, "", pageSize, offset)
 		if err != nil {
 			slog.Warn("listing tasks for resync", "error", err)
 			return sent
@@ -124,7 +125,9 @@ func (s *Server) ResyncTasks(ctx context.Context, opts TaskResyncOptions) int {
 	}
 }
 
-// resyncTask sends one task's stored state. It reports whether it sent it.
+// resyncTask sends one task's state as GetTask reports it: the phase, the
+// Ready condition, and the holds follow from the task's actor, which it reads
+// under the task's lock. It reports whether it sent the event.
 func (s *Server) resyncTask(ctx context.Context, lockTimeout time.Duration, atespace, name string) bool {
 	if atespace == "" {
 		atespace = "default"
@@ -137,7 +140,7 @@ func (s *Server) resyncTask(ctx context.Context, lockTimeout time.Duration, ates
 		return false
 	}
 	defer unlock()
-	task, err := s.store.GetTask(ctx, atespace, name)
+	task, err := s.getTask(ctx, atespace, name)
 	if err != nil {
 		// The task was deleted after the list; its delete event went out.
 		return false

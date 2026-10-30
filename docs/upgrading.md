@@ -4,17 +4,18 @@ This page lists the defaults that this version of `ax-server` changes, and what 
 
 ## Sandbox size
 
-`ax-server` now writes CPU and memory limits into the actor template of each task, and Agent Substrate books that size on a worker. A task that sets no `spec.resources` gets `--default-task-cpu` (default `1`) and `--default-task-memory` (default `2Gi`). Before this version, the template had no limits, and the sandbox got the size that Agent Substrate gives a template without limits.
+`ax-server` writes CPU and memory limits into the actor template of each task, and Agent Substrate books that size on a worker. `spec.resources.limits` sets the size. A limit that the task does not set gets a fixed default: `1` CPU (`1000m`) and `512Mi` memory. `ax apply` rejects `spec.resources.requests`. See [Sizing the sandbox](manifests.md#sizing-the-sandbox).
 
-The effect on new tasks:
+The earlier version of this fork had the flags `--default-task-cpu` (default `1`) and `--default-task-memory` (default `2Gi`), and it used `spec.resources.requests` when a task set no limits. This version removes both flags, and it does not use requests. The effect on new tasks:
 
-- A worker can hold fewer tasks if its earlier tasks were smaller than 1 vCPU and 2 GiB.
+- A task that sets no memory limit gets `512Mi`, not `2Gi`. To keep the earlier size, set `spec.resources.limits.memory: 2Gi` in each task.
+- A manifest that sets `spec.resources.requests` is rejected. Move the values to `spec.resources.limits`.
+- Remove `--default-task-cpu` and `--default-task-memory` from the `ax-server` arguments. `ax-server` does not start with a flag that it does not know.
 - The Cost Service prices a sandbox by the size that it books. A larger booking costs more, also when the agent does not use it.
-- To keep the earlier size, set `spec.resources` in each task, or set `--default-task-cpu` and `--default-task-memory`.
 
 ## Template name
 
-The name of a task's actor template is a hash of the image, the environment, and the sandbox limits. The limits are new in the hash, so the template name of each existing task is different after the upgrade. A change to `--default-task-cpu` or `--default-task-memory` also changes the name.
+The name of a task's actor template is a hash of the image and the environment. The environment holds the task's launch configuration (`AX_TASK_YAML`), which includes `spec.resources`. When a new version of `ax-server` writes a different launch configuration, the template name of each existing task is different after the upgrade.
 
 `ax-server` does not move an existing actor to a new template. On each suspend or resume, it reads the actor from Agent Substrate. If the actor exists, `ax-server` uses the template of the actor, and it does not create a template with the new name. So:
 
@@ -34,11 +35,14 @@ The effect on existing tasks:
 
 - A task that is running at the upgrade gets an outcome when its command exits.
 - A task that runs a runner image without `/statusz` gets an error from each request, and it gets no outcome. `ax-server` logs the error at debug level only.
-- The router resumes a suspended actor to answer a request. `ax-server` sends a request only for a task that is `Running` in its store, under the task lock. A suspended task stays suspended.
+- The router resumes a suspended actor to answer a request. `ax-server` sends a request only for a task whose actor is running. It reads the actor from Agent Substrate under the task lock before each request. A suspended task stays suspended.
+- `--router-addr` takes a URL or a `host:port`. Port `443` means https: `ax-server` then presents its pod identity certificate to the router, as it does for its readiness probes.
 
 ## Task events
 
 When `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` is set, `ax-server` now sends task events (`ax.task.state_changed`) to an OpenTelemetry Collector for downstream task-tree joins. It also sends the current state of every task when it starts, and then every `--task-resync-interval` (default `10m`; `0` turns it off).
+
+The store keeps only the phases of AX's own work: `Pending`, `Failed`, and `Terminating`. `ax-server` reads the other phases (`Running`, `Resuming`, `Suspending`, `Suspended`, and `Unknown`) from the task's actor. Each event carries the phase that `GetTask` reports at that time. So the resync also reads the actor of each task, under the task lock.
 
 ## Access control
 
@@ -51,5 +55,5 @@ When `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` is set,
 - A task with `spec.budget.maxUsd` and scope `Tree` (the default) is a budget group. Its actor and every actor under it through `spec.parent` get `agent-cost/budget-group: <task>` (the Cost Service keys the group as `group:<atespace>/<task>`); its own actor also gets `agent-cost/budget-limit-usd` and, when `warnAt` is set, `agent-cost/warn-at`. A `Task` scope covers only that task's actor. The outermost Tree budget wins when budgets nest.
 - Substrate must let `ax-server`'s identity manage the `agent-cost/budget-*` label prefix. If `SetActorLabels` fails, the task still runs; it gets a `BudgetLabelsSynced=False` condition, and the next reconcile retries.
 - `ax budget set <task> --max-usd N` (the new `UpdateTaskBudget` RPC, verb `update` on `tasks`) changes a budget after create and syncs the labels of the whole subtree. The Cost Service sees a raised limit and removes its `agent-cost/budget` holds.
-- `GetTask` and `ListTasks` read holds from Substrate on each call and return them in `status.holds`. A resume of a held task fails with `FailedPrecondition`, and the task stays `Suspended` with `Ready=False`, reason `Held`.
+- `GetTask` and `ListTasks` read holds and the budget group label from the actor on each call, with the same actor read that gives the phase. They return them in `status.holds` and `status.budgetGroup`. The store does not keep the holds. A resume of a held task fails with `FailedPrecondition`. The task stays `Suspended`, and a suspended task with a hold has `Ready=False` with reason `Held`.
 - The Cost Service is now `cost.ate-cost.svc`. `ax cost` port-forwards to `svc/cost:9090` in namespace `ate-cost` (`--cost-server`, `--cost-namespace`, `$AX_COST_SERVER`). The old `--finops-*` flags and `$AX_FINOPS_*` variables still work.

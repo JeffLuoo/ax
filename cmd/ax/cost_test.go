@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,7 +26,6 @@ import (
 	"testing"
 
 	"github.com/google/ax/internal/costapi"
-	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store/memory"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 )
@@ -289,17 +287,11 @@ func TestRunCostCommands(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	axSrv := server.NewServer(s).GRPCServer()
-	t.Cleanup(axSrv.Stop)
-	go func() { _ = axSrv.Serve(listener) }()
+	axAddr := serveAX(t, s)
 
 	t.Run("list table joined with ax-server", func(t *testing.T) {
 		out, err := captureStdout(t, func() error {
-			return runCost(costSrv.URL, listener.Addr().String(), "otel-bench", true, nil)
+			return runCost(costSrv.URL, axAddr, "otel-bench", true, nil)
 		})
 		if err != nil {
 			t.Fatalf("runCost list failed: %v", err)
@@ -313,7 +305,7 @@ func TestRunCostCommands(t *testing.T) {
 
 	t.Run("task detail report", func(t *testing.T) {
 		out, err := captureStdout(t, func() error {
-			return runCost(costSrv.URL, listener.Addr().String(), "otel-bench", true, []string{"task", "coding-parent-1"})
+			return runCost(costSrv.URL, axAddr, "otel-bench", true, []string{"task", "coding-parent-1"})
 		})
 		if err != nil {
 			t.Fatalf("runCost task detail failed: %v", err)

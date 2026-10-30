@@ -6,8 +6,8 @@ require (
 	github.com/agent-substrate/env v0.0.11-0.20260912052224-4468a200b170
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/go-logr/logr v1.4.4
-	github.com/redis/go-redis/v9 v9.22.0
-	go.ate.dev/substrate v0.0.0-20261027200310-a51247c1d8b5
+	github.com/jackc/pgx/v5 v5.11.0
+	go.ate.dev/substrate v0.0.0-20261030151111-753d2837b1a5
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.23.0
 	go.opentelemetry.io/otel/log v1.47.0
@@ -46,6 +46,9 @@ require (
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
@@ -55,11 +58,11 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
@@ -76,4 +79,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace go.ate.dev/substrate => github.com/JeffLuoo/substrate v0.0.0-20261027200310-a51247c1d8b5
+replace go.ate.dev/substrate => github.com/JeffLuoo/substrate v0.0.0-20261030151111-753d2837b1a5

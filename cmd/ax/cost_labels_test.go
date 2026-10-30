@@ -32,8 +32,10 @@ import (
 	"github.com/google/ax/internal/costapi"
 	"github.com/google/ax/internal/server"
 	"github.com/google/ax/internal/store/memory"
+	"github.com/google/ax/internal/substrate/substratetest"
 	"github.com/google/ax/internal/tunnel"
 	"github.com/google/ax/pkg/apis/v1alpha1"
+	ateapipb "go.ate.dev/substrate/api/ateapi/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
 )
@@ -168,11 +170,39 @@ func axServer(t *testing.T, tasks ...*v1alpha1.Task) string {
 			t.Fatal(err)
 		}
 	}
+	return serveAX(t, s)
+}
+
+// serveAX starts an in-memory AX gRPC server on the tasks in s and an
+// in-memory Agent Substrate. ax-server reads the phase of a task from its
+// actor, so each task whose stored phase is not one of AX's own gets an actor:
+// running for phase Running, and suspended for any other phase.
+func serveAX(t *testing.T, s *memory.MemoryStore) string {
+	t.Helper()
+	sub := substratetest.NewServer(t)
+	stored, err := s.ListTasks(context.Background(), "", 10000, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range stored {
+		phase := task.GetStatus().GetPhase()
+		if v1alpha1.IsAXPhase(phase) {
+			continue
+		}
+		state := ateapipb.ActorState_ACTOR_STATE_SUSPENDED
+		if phase == v1alpha1.PhaseRunning {
+			state = ateapipb.ActorState_ACTOR_STATE_RUNNING
+		}
+		sub.SetActor(&ateapipb.Actor{
+			Metadata: &ateapipb.ResourceMetadata{Atespace: task.GetMetadata().GetAtespace(), Name: task.GetMetadata().GetName()},
+			Status:   &ateapipb.ActorStatus{State: state},
+		})
+	}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	gs := server.NewServer(s).GRPCServer()
+	gs := server.NewServer(s, newTestReconciler(sub)).GRPCServer()
 	t.Cleanup(gs.Stop)
 	go func() { _ = gs.Serve(lis) }()
 	return lis.Addr().String()
