@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -161,6 +162,8 @@ func main() {
 		err = runSuspend(serverURL, atespace, cleanArgs)
 	case "resume":
 		err = runResume(serverURL, atespace, cleanArgs)
+	case "fork":
+		err = runFork(serverURL, atespace, cleanArgs)
 	case "promote":
 		err = runPromote(serverURL, atespace, cleanArgs)
 	case "delete":
@@ -271,6 +274,7 @@ Available Commands:
                           (Ctrl-C is forwarded; press it twice quickly, or Ctrl-\, to exit locally)
   suspend task <name>     Suspend execution of a task and checkpoint state
   resume task <name>      Resume execution of a suspended task
+  fork task <name>        Snapshot a task and create tasks from it (--count N, --names, --tag, --resume)
   promote task <name> --to <context> Promote a task to another cluster
   delete task <name>      Delete a task
   delete workspace <name> Delete a workspace
@@ -888,6 +892,104 @@ func runResume(serverURL, atespace string, args []string) error {
 	}
 
 	fmt.Printf("task.ax.io/%s resumed\n", name)
+	return nil
+}
+
+// forkUsage is the usage line of ax fork.
+const forkUsage = "usage: ax fork task <name> [--count N | --names a,b,c] [--tag T] [--resume]"
+
+// runFork suspends a task, tags its snapshot, and creates tasks from it. The
+// forks are named <name>-fork-1 to <name>-fork-N unless --names is set.
+func runFork(serverURL, atespace string, args []string) error {
+	if len(args) > 0 && (args[0] == "task" || args[0] == "tasks") {
+		args = args[1:]
+	}
+	var (
+		name, tag string
+		names     []string
+		count     = 1
+		resume    bool
+	)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		value := func() (string, error) {
+			if k, v, ok := strings.Cut(arg, "="); ok && strings.HasPrefix(k, "--") {
+				return v, nil
+			}
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("%s needs a value\n%s", arg, forkUsage)
+			}
+			i++
+			return args[i], nil
+		}
+		switch flag, _, _ := strings.Cut(arg, "="); flag {
+		case "--count":
+			v, err := value()
+			if err != nil {
+				return err
+			}
+			if count, err = strconv.Atoi(v); err != nil || count < 1 {
+				return fmt.Errorf("--count must be a positive number\n%s", forkUsage)
+			}
+		case "--names":
+			v, err := value()
+			if err != nil {
+				return err
+			}
+			names = strings.Split(v, ",")
+		case "--tag":
+			v, err := value()
+			if err != nil {
+				return err
+			}
+			tag = v
+		case "--resume":
+			resume = true
+		default:
+			if strings.HasPrefix(arg, "-") || name != "" {
+				return fmt.Errorf("unexpected argument %q\n%s", arg, forkUsage)
+			}
+			name = arg
+		}
+	}
+	if name == "" {
+		return errors.New(forkUsage)
+	}
+	if len(names) == 0 {
+		for i := 1; i <= count; i++ {
+			names = append(names, fmt.Sprintf("%s-fork-%d", name, i))
+		}
+	}
+
+	client, conn, err := getAXClient(serverURL)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), lifecycleRPCTimeout)
+	defer cancel()
+
+	start := time.Now()
+	resp, err := client.ForkTask(ctx, &v1alpha1.ForkTaskRequest{
+		Atespace:  atespace,
+		Name:      name,
+		Tag:       tag,
+		ForkNames: names,
+		Resume:    resume,
+	})
+	if err != nil {
+		return fmt.Errorf("forking task: %w", err)
+	}
+	fmt.Printf("task.ax.io/%s checkpointed as tag %s\n", name, resp.GetTag())
+	verb := "created"
+	if resume {
+		verb = "resumed"
+	}
+	for _, f := range resp.GetForks() {
+		fmt.Printf("task.ax.io/%s %s from %s\n", f.GetMetadata().GetName(), verb, resp.GetTag())
+	}
+	fmt.Printf("forked %d task(s) in %s\n", len(resp.GetForks()), time.Since(start).Round(time.Millisecond))
 	return nil
 }
 

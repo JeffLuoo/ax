@@ -177,6 +177,9 @@ func (s *Server) CreateTask(ctx context.Context, req *v1alpha1.CreateTaskRequest
 	if field := firstUnimplementedTaskField(task.GetSpec()); field != "" {
 		return nil, status.Errorf(codes.Unimplemented, "%s is not supported yet", field)
 	}
+	if task.GetSpec().GetForkSource() != nil {
+		return nil, status.Error(codes.InvalidArgument, "spec.forkSource is set only by ForkTask")
+	}
 	if task.Metadata == nil {
 		task.Metadata = &v1alpha1.ObjectMeta{}
 	}

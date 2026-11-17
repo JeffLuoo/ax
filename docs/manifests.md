@@ -106,6 +106,7 @@ Substrate sizes sandboxes by limits alone, so `spec.profile.resources.requests` 
 - **`spec.goal.text`** is an optional natural-language description of the task's objective, delivered as part of the task metadata.
 - **`spec.retry`** configures retry limits and backoff (`maxRetries >= 0`, non-negative `initialBackoff` and `maxBackoff` with `initialBackoff <= maxBackoff`, and `backoffMultiplier >= 1.0` when set). *Not available yet: ax-server rejects `spec.retry` until task retries are wired.*
 - **`spec.sessionId`** groups related tasks or multi-turn runs under one correlation ID. When omitted, `CreateTask` defaults it to the server-assigned `metadata.uid`.
+- **`spec.forkSource`** (`task`, `tag`) is set only by `ForkTask` (`ax fork task <name>`), and `CreateTask` rejects it. A fork starts from the Substrate tag that holds the source task's snapshot and runs on the source task's ActorTemplate. With ax-server's `--task-snapshot-fidelity=memory`, a fork resumes with the source task's running processes and memory; with the default `volumes`, it starts fresh with the source task's volumes.
 
 ### Runner configuration
 

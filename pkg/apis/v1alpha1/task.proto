@@ -89,6 +89,19 @@ message TaskSpec {
   // Logical multi-turn session / conversation thread ID. Defaults to
   // metadata.uid on CreateTask if unset.
   string session_id = 10;
+
+  // The snapshot this task was forked from. Only ForkTask sets it; CreateTask
+  // rejects it. A forked task starts from the source task's snapshot and runs
+  // on the source task's ActorTemplate.
+  ForkSource fork_source = 11;
+}
+
+// ForkSource names the task and the Substrate tag that a fork starts from.
+message ForkSource {
+  // Name of the source task, in the same atespace.
+  string task = 1;
+  // Name of the Substrate tag that holds the source task's snapshot.
+  string tag = 2;
 }
 
 message EnvVar {
@@ -212,4 +225,24 @@ message SuspendTaskRequest {
 message ResumeTaskRequest {
   string atespace = 1;
   string name = 2;
+}
+
+// ForkTaskRequest suspends a task, tags its snapshot, and creates one task per
+// name in fork_names from that snapshot.
+message ForkTaskRequest {
+  string atespace = 1;
+  // Name of the task to fork.
+  string name = 2;
+  // Name of the tag to create. Defaults to "<name>-<unix seconds>".
+  string tag = 3;
+  // Names of the tasks to create. Each must not exist yet.
+  repeated string fork_names = 4;
+  // Resume each fork after it is created.
+  bool resume = 5;
+}
+
+message ForkTaskResponse {
+  // Name of the tag that holds the source task's snapshot.
+  string tag = 1;
+  repeated Task forks = 2;
 }

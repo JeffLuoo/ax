@@ -188,9 +188,23 @@ func (r *TaskReconciler) ensureSubstrateResources(ctx context.Context, task *v1a
 	// 3. Resolve or provision the ActorTemplate for the task.
 	var (
 		templateAtespace, templateName string
+		sourceTag                      string
 		err                            error
 	)
-	if tpl := effective.GetAteActorTemplate(); tpl != "" {
+	if fork := task.Spec.GetForkSource(); fork != nil {
+		// Substrate creates an actor from a tag only on the ActorTemplate of
+		// the tag's source actor, so a fork reuses the template that ForkTask
+		// recorded from the source task.
+		templateAtespace = atespace
+		templateName = task.Status.GetAteActorTemplate()
+		sourceTag = fork.GetTag()
+		if templateName == "" || sourceTag == "" {
+			msg := "a forked task needs the source task's template and a tag"
+			r.setNotReady(task, v1alpha1.ReasonActorCreationFailed, msg, now)
+			return errors.New(msg)
+		}
+		slog.Info("reconciling forked task", "name", task.Metadata.Name, "atespace", atespace, "sourceTask", fork.GetTask(), "tag", sourceTag, "template", templateName)
+	} else if tpl := effective.GetAteActorTemplate(); tpl != "" {
 		slog.Info("reconciling task with existing ActorTemplate", "name", task.Metadata.Name, "atespace", atespace, "ateActorTemplate", tpl)
 		if _, err := r.client.GetActorTemplate(ctx, atespace, tpl); err != nil {
 			if substrate.IsTransientError(err) {
@@ -214,7 +228,7 @@ func (r *TaskReconciler) ensureSubstrateResources(ctx context.Context, task *v1a
 		}
 	}
 
-	_, err = r.client.EnsureActor(ctx, atespace, actorName, templateAtespace, templateName)
+	_, err = r.client.EnsureActorFromTag(ctx, atespace, actorName, templateAtespace, templateName, sourceTag)
 	if err != nil {
 		if substrate.IsTransientError(err) {
 			r.setNotReady(task, v1alpha1.ReasonSubstrateUnavailable, err.Error(), now)
@@ -332,6 +346,34 @@ func (r *TaskReconciler) bindGateway(ctx context.Context, task *v1alpha1.Task, g
 		return fmt.Errorf("binding gateway %q: %w", gwName, err)
 	}
 	return nil
+}
+
+// Checkpoint suspends the task's actor, waits until its snapshot is durable,
+// and tags the snapshot as tagName. The tag holds its own copy of the
+// snapshot, so tasks created from it do not depend on the source actor.
+//
+// It returns the name of the ActorTemplate that the source actor runs on.
+// Substrate creates an actor from the tag only on that template. The task's
+// status can name a newer template, because a reconcile recomputes the name
+// while an existing actor keeps its template.
+func (r *TaskReconciler) Checkpoint(ctx context.Context, task *v1alpha1.Task, tagName string) (string, error) {
+	atespace, actorName := task.GetMetadata().GetAtespace(), task.GetMetadata().GetName()
+	slog.Info("checkpointing actor on Substrate", "actor", actorName, "tag", tagName)
+	if err := r.client.SuspendActorAndWaitForSnapshot(ctx, atespace, actorName); err != nil {
+		return "", fmt.Errorf("suspending actor: %w", err)
+	}
+	actor, err := r.client.GetActor(ctx, atespace, actorName)
+	if err != nil {
+		return "", fmt.Errorf("getting actor: %w", err)
+	}
+	template := actor.GetActorTemplate()
+	if template.GetName() == "" || template.GetAtespace() != atespace {
+		return "", fmt.Errorf("actor %s/%s runs on template %s/%s; a fork needs a template in the task's atespace", atespace, actorName, template.GetAtespace(), template.GetName())
+	}
+	if _, err := r.client.CreateTag(ctx, atespace, tagName, actorName); err != nil {
+		return "", fmt.Errorf("tagging snapshot: %w", err)
+	}
+	return template.GetName(), nil
 }
 
 // Suspend runs ensureSubstrateResources, suspends the task's actor, and then

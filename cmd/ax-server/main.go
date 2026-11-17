@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/jackc/pgx/v5/pgconn"
+	ateapipb "go.ate.dev/substrate/api/ateapi/v1"
 	"google.golang.org/grpc"
 )
 
@@ -53,6 +55,7 @@ func main() {
 		defaultTemplateAtespace string
 		defaultTaskImage        string
 		runnerVolumeImage       string
+		taskSnapshotFidelity    string
 	)
 
 	flag.StringVar(&listenAddr, "addr", ":8080", "HTTP listen address")
@@ -68,6 +71,7 @@ func main() {
 	flag.StringVar(&defaultTemplateAtespace, "template-atespace", v1alpha1.DefaultSystemNamespace, "Default Substrate ActorTemplate atespace")
 	flag.StringVar(&defaultTaskImage, "default-task-image", v1alpha1.DefaultTaskImage, "Container image for tasks that do not set spec.profile.image (env: AX_DEFAULT_TASK_IMAGE)")
 	flag.StringVar(&runnerVolumeImage, "runner-volume-image", "", "Digest-pinned runner volume image (Dockerfile.runner-volume) to mount read-only into task containers and run the runner from; empty runs the runner baked into the task image (env: AX_RUNNER_VOLUME_IMAGE)")
+	flag.StringVar(&taskSnapshotFidelity, "task-snapshot-fidelity", "", "Snapshot fidelity of the templates ax-server builds for tasks: volumes, rootfs, or memory; empty keeps volumes. A fork keeps running processes only with memory (env: AX_TASK_SNAPSHOT_FIDELITY)")
 	flag.Parse()
 
 	if envAddr := os.Getenv("ADDR"); envAddr != "" {
@@ -139,6 +143,18 @@ func main() {
 		os.Exit(1)
 	}
 	defer subClient.Close()
+	if v := os.Getenv("AX_TASK_SNAPSHOT_FIDELITY"); v != "" {
+		taskSnapshotFidelity = v
+	}
+	if taskSnapshotFidelity != "" {
+		f, ok := ateapipb.SnapshotFidelity_value["SNAPSHOT_FIDELITY_"+strings.ToUpper(taskSnapshotFidelity)]
+		if !ok || f == 0 {
+			slog.Error("invalid --task-snapshot-fidelity; use volumes, rootfs, or memory", "value", taskSnapshotFidelity)
+			os.Exit(1)
+		}
+		subClient.TaskSnapshotFidelity = ateapipb.SnapshotFidelity(f)
+		slog.Info("task templates use snapshot fidelity", "fidelity", subClient.TaskSnapshotFidelity.String())
+	}
 
 	reconciler := controller.NewTaskReconciler(subClient, defaultTemplate, defaultTemplateAtespace, defaultTaskImage)
 	reconciler.RunnerVolumeImage = runnerVolumeImage

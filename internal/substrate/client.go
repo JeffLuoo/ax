@@ -74,6 +74,11 @@ func (t tokenAuth) RequireTransportSecurity() bool {
 type Client struct {
 	conn    *grpc.ClientConn
 	control ateapipb.ControlClient
+
+	// TaskSnapshotFidelity, when set, replaces the snapshot fidelity of the
+	// templates that EnsureActorTemplateWithImage builds for tasks. A fork
+	// keeps running processes only with SNAPSHOT_FIDELITY_MEMORY.
+	TaskSnapshotFidelity ateapipb.SnapshotFidelity
 }
 
 // NewClientWithOptions connects to Substrate with full TLS and auth configuration.
@@ -497,6 +502,9 @@ func (c *Client) EnsureActorTemplateWithImage(ctx context.Context, baseAtespace,
 		maps.Copy(envMap, envs)
 	}
 	tmpl := BuildActorTemplate(targetAtespace, targetTemplate, image, envMap, nil, "", resources)
+	if c.TaskSnapshotFidelity != ateapipb.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED {
+		tmpl.SnapshotConfig.PreferredFidelity = c.TaskSnapshotFidelity
+	}
 	MountRunnerVolume(tmpl, runnerVolumeImage)
 	return c.EnsureActorTemplate(ctx, tmpl)
 }
